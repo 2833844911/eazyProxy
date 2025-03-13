@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>代理服务器管理面板</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <header class="dashboard-header">
+            <h1>代理服务器管理系统</h1>
+            <div class="user-info">
+                <span id="current-user">管理员</span>
+                <button id="logout-btn" class="btn-logout">退出登录</button>
+            </div>
+        </header>
+
+        <div class="dashboard-content">
+            <div class="sidebar">
+                <ul class="nav-menu">
+                    <li class="active" data-tab="status">服务器状态</li>
+                    <li data-tab="users">用户管理</li>
+                    <li data-tab="settings">系统设置</li>
+                    <li data-tab="stats">访问统计</li>
+                </ul>
+            </div>
+
+            <div class="main-content">
+                <!-- 服务器状态面板 -->
+                <div id="status-panel" class="panel active">
+                    <h2>服务器状态</h2>
+                    <div class="status-card">
+                        <div class="status-item">
+                            <span class="label">运行状态:</span>
+                            <span id="proxy-status" class="value status-indicator">停止</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">监听地址:</span>
+                            <span id="proxy-address" class="value">0.0.0.0:8080</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">启动时间:</span>
+                            <span id="start-time" class="value">-</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">总连接数:</span>
+                            <span id="connection-count" class="value">0</span>
+                        </div>
+                        <div class="status-actions">
+                            <button id="start-proxy" class="btn-action">启动服务</button>
+                            <button id="stop-proxy" class="btn-action" disabled>停止服务</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 用户管理面板 -->
+                <div id="users-panel" class="panel">
+                    <h2>用户管理</h2>
+                    <div class="user-list-container">
+                        <table class="user-table">
+                            <thead>
+                                <tr>
+                                    <th>用户名</th>
+                                    <th>密码</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="user-list">
+                                <!-- 用户列表将通过JavaScript动态生成 -->
+                            </tbody>
+                        </table>
+                        <div class="add-user-form">
+                            <h3>添加新用户</h3>
+                            <form id="add-user-form">
+                                <div class="form-group">
+                                    <label for="new-username">用户名</label>
+                                    <input type="text" id="new-username" name="username" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="new-password">密码</label>
+                                    <input type="password" id="new-password" name="password" required>
+                                </div>
+                                <button type="submit" class="btn-add">添加用户</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 系统设置面板 -->
+                <div id="settings-panel" class="panel">
+                    <h2>系统设置</h2>
+                    <form id="settings-form" class="settings-form">
+                        <div class="form-group">
+                            <label for="proxy-port">代理服务器端口</label>
+                            <input type="number" id="proxy-port" name="proxy-port" min="1" max="65535" value="8080" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="web-port">Web管理端口</label>
+                            <input type="number" id="web-port" name="web-port" min="1" max="65535" value="8081" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="admin-username">管理员用户名</label>
+                            <input type="text" id="admin-username" name="admin-username" value="admin" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="admin-password">管理员密码</label>
+                            <input type="password" id="admin-password" name="admin-password" placeholder="输入新密码以修改" autocomplete="new-password">
+                        </div>
+                        <button type="submit" class="btn-save">保存设置</button>
+                    </form>
+                </div>
+
+                <!-- 访问统计面板 -->
+                <div id="stats-panel" class="panel">
+                    <h2>访问统计</h2>
+                    <div class="stats-summary">
+                        <div class="stats-card">
+                            <h3>总请求数</h3>
+                            <div id="total-requests" class="stats-value">0</div>
+                        </div>
+                        <div class="stats-card">
+                            <h3>域名统计</h3>
+                            <div class="stats-table-container">
+                                <table class="stats-table">
+                                    <thead>
+                                        <tr>
+                                            <th>域名</th>
+                                            <th>请求次数</th>
+                                            <th>最后访问时间</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="domain-stats">
+                                        <!-- 域名统计将通过JavaScript动态生成 -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <button id="reset-stats" class="btn-reset">重置统计</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>
