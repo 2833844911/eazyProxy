@@ -786,6 +786,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         panel.classList.remove('active');
                     }
                 });
+                
+                // 如果切换到代理转发选项卡，加载转发设置
+                if (tabId === 'forward') {
+                    loadPortForwardSettings(port.id);
+                }
             });
         });
         
@@ -962,6 +967,46 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // 加载端口专用用户
         loadPortUsers(port.id);
+        
+        // 加载端口代理转发设置
+        loadPortForwardSettings(port.id);
+    }
+    
+    // 加载端口代理转发设置
+    function loadPortForwardSettings(portId) {
+        fetch(`/api/proxy/ports/${portId}/forward`, {
+            headers: {
+                'Authorization': 'Bearer ' + localStorage.getItem('token')
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const settings = data.data;
+                
+                // 更新表单字段
+                document.getElementById('port-use-forward-proxy').checked = settings.use_forward_proxy;
+                
+                if (settings.remote_proxy_addr) {
+                    document.getElementById('port-remote-proxy-addr').value = settings.remote_proxy_addr;
+                }
+                
+                if (settings.remote_proxy_user) {
+                    document.getElementById('port-remote-proxy-user').value = settings.remote_proxy_user;
+                }
+                
+                // 更新转发设置区域的显示状态
+                const forwardSettings = document.getElementById('port-forward-settings');
+                if (settings.use_forward_proxy) {
+                    forwardSettings.classList.remove('disabled');
+                } else {
+                    forwardSettings.classList.add('disabled');
+                }
+            }
+        })
+        .catch(error => {
+            console.error('获取端口代理转发设置失败:', error);
+        });
     }
     
     // 加载端口专用用户
