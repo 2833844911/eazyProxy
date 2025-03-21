@@ -404,3 +404,21 @@ body {
 .btn-reset:hover {
     background-color: #ffc53d;
 }
+
+/* 添加复选框样式 */
+.checkbox-group {
+    display: flex;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.checkbox-group input[type="checkbox"] {
+    margin-right: 10px;
+    width: auto;
+    height: auto;
+}
+
+.checkbox-group label {
+    margin: 0;
+    font-weight: normal;
+}

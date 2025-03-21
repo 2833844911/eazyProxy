@@ -138,6 +138,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const webPort = document.getElementById('web-port').value;
         const adminUsername = document.getElementById('admin-username').value;
         const adminPassword = document.getElementById('admin-password').value;
+        const useForwardProxy = document.getElementById('use-forward-proxy').checked;
         
         fetch('/api/settings', {
             method: 'POST',
@@ -149,7 +150,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 proxy_port: proxyPort,
                 web_port: webPort,
                 admin_username: adminUsername,
-                admin_password: adminPassword || undefined
+                admin_password: adminPassword || undefined,
+                use_forward_proxy: useForwardProxy
             })
         })
         .then(response => response.json())
@@ -319,6 +321,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('proxy-port').value = settings.proxy_port;
                 document.getElementById('web-port').value = settings.web_port;
                 document.getElementById('admin-username').value = settings.admin_username;
+                document.getElementById('use-forward-proxy').checked = settings.use_forward_proxy || false;
             }
         })
         .catch(error => {

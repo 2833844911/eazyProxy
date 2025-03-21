@@ -88,11 +88,12 @@ func (sm *StatsManager) Reset() {
 // 扩展代理配置
 type ExtendedProxyConfig struct {
 	ProxyConfig
-	AdminUsername string
-	AdminPassword string
-	WebPort       string
-	Status        *ProxyStatus
-	StatsManager  *StatsManager
+	AdminUsername   string
+	AdminPassword   string
+	WebPort         string
+	Status          *ProxyStatus
+	StatsManager    *StatsManager
+	UseForwardProxy bool // 是否启用代理转发功能
 }
 
 // 创建新的扩展代理配置
@@ -102,10 +103,11 @@ func NewExtendedProxyConfig() *ExtendedProxyConfig {
 			ListenAddr: "0.0.0.0:8080",
 			CredStore:  NewCredentialStore(),
 		},
-		AdminUsername: "admin",
-		AdminPassword: "admin",
-		WebPort:       "8081",
-		Status:        &ProxyStatus{Running: false, StartTime: time.Time{}, ConnectionCount: 0, mutex: sync.RWMutex{}},
-		StatsManager:  NewStatsManager(),
+		AdminUsername:   "admin",
+		AdminPassword:   "admin",
+		WebPort:         "8081",
+		Status:          &ProxyStatus{Running: false, StartTime: time.Time{}, ConnectionCount: 0, mutex: sync.RWMutex{}},
+		StatsManager:    NewStatsManager(),
+		UseForwardProxy: false, // 默认不启用代理转发
 	}
 }

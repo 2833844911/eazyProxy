@@ -373,9 +373,10 @@ func handleGetSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"proxy_port":     strings.Split(globalConfig.ListenAddr, ":")[1],
-			"web_port":       globalConfig.WebPort,
-			"admin_username": globalConfig.AdminUsername,
+			"proxy_port":        strings.Split(globalConfig.ListenAddr, ":")[1],
+			"web_port":          globalConfig.WebPort,
+			"admin_username":    globalConfig.AdminUsername,
+			"use_forward_proxy": globalConfig.UseForwardProxy,
 		},
 	})
 }
@@ -384,10 +385,11 @@ func handleGetSettings(c *gin.Context) {
 func handleUpdateSettings(c *gin.Context) {
 	// 解析请求
 	var req struct {
-		ProxyPort     string `json:"proxy_port"`
-		WebPort       string `json:"web_port"`
-		AdminUsername string `json:"admin_username"`
-		AdminPassword string `json:"admin_password"`
+		ProxyPort       string `json:"proxy_port"`
+		WebPort         string `json:"web_port"`
+		AdminUsername   string `json:"admin_username"`
+		AdminPassword   string `json:"admin_password"`
+		UseForwardProxy bool   `json:"use_forward_proxy"`
 	}
 
 	if err := c.BindJSON(&req); err != nil {
@@ -443,6 +445,9 @@ func handleUpdateSettings(c *gin.Context) {
 	if req.AdminPassword != "" {
 		globalConfig.AdminPassword = req.AdminPassword
 	}
+
+	// 更新代理转发设置
+	globalConfig.UseForwardProxy = req.UseForwardProxy
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
