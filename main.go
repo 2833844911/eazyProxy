@@ -22,27 +22,44 @@ type ProxyConfig struct {
 // 代理服务器
 type ProxyServer struct {
 	config interface{}
+	portID string // 添加端口ID字段
 }
 
 // 创建新的代理服务器
-func NewProxyServer(config interface{}) *ProxyServer {
+func NewProxyServer(config interface{}, portID string) *ProxyServer {
 	return &ProxyServer{
 		config: config,
+		portID: portID,
 	}
 }
 
-// 代理服务器监听器
-var proxyListener net.Listener
+// 代理服务器监听器映射，key为端口ID
+var proxyListeners = make(map[string]net.Listener)
 var listenerMutex sync.Mutex
 
 // 启动代理服务器
 func (ps *ProxyServer) Start() error {
 	// 获取监听地址
 	var listenAddr string
+	var allowAnonymous bool
+
 	if config, ok := ps.config.(ProxyConfig); ok {
 		listenAddr = config.ListenAddr
 	} else if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok {
-		listenAddr = extConfig.ListenAddr
+		// 如果是多端口配置，使用对应端口的配置
+		if ps.portID != "" {
+			portConfig := extConfig.GetProxyPort(ps.portID)
+			if portConfig != nil {
+				listenAddr = portConfig.ListenAddr
+				allowAnonymous = portConfig.AllowAnonymous
+			} else {
+				return fmt.Errorf("无效的端口ID: %s", ps.portID)
+			}
+		} else {
+			// 兼容旧版本
+			listenAddr = extConfig.ListenAddr
+			allowAnonymous = extConfig.AllowAnonymous
+		}
 	} else {
 		return fmt.Errorf("无效的配置类型")
 	}
@@ -58,10 +75,31 @@ func (ps *ProxyServer) Start() error {
 	}
 
 	// 保存监听器的引用
-	proxyListener = listener
+	proxyListeners[ps.portID] = listener
 	listenerMutex.Unlock()
 
-	log.Printf("HTTPS代理服务器已启动，监听地址: %s\n", listenAddr)
+	log.Printf("HTTPS代理服务器已启动，监听地址: %s (端口ID: %s)\n", listenAddr, ps.portID)
+
+	// 更新状态
+	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok {
+		if ps.portID != "" {
+			portConfig := extConfig.GetProxyPort(ps.portID)
+			if portConfig != nil {
+				portConfig.Status.mutex.Lock()
+				portConfig.Status.Running = true
+				portConfig.Status.StartTime = time.Now()
+				portConfig.Status.ConnectionCount = 0
+				portConfig.Status.mutex.Unlock()
+			}
+		} else {
+			// 兼容旧版本
+			extConfig.Status.mutex.Lock()
+			extConfig.Status.Running = true
+			extConfig.Status.StartTime = time.Now()
+			extConfig.Status.ConnectionCount = 0
+			extConfig.Status.mutex.Unlock()
+		}
+	}
 
 	// 监听连接请求
 	for {
@@ -69,28 +107,38 @@ func (ps *ProxyServer) Start() error {
 		if err != nil {
 			// 检查是否是因为监听器被关闭导致的错误
 			if strings.Contains(err.Error(), "use of closed network connection") {
-				log.Printf("监听器已关闭，代理服务器停止\n")
+				log.Printf("监听器已关闭，代理服务器停止 (端口ID: %s)\n", ps.portID)
 				break
 			}
-			log.Printf("接受连接失败: %v\n", err)
+			log.Printf("接受连接失败: %v (端口ID: %s)\n", err, ps.portID)
 			continue
 		}
 
-		go ps.handleConnection(client)
+		go ps.handleConnection(client, allowAnonymous)
 	}
 
 	return nil
 }
 
 // 处理客户端连接
-func (ps *ProxyServer) handleConnection(client net.Conn) {
+func (ps *ProxyServer) handleConnection(client net.Conn, allowAnonymous bool) {
 	defer client.Close()
 
 	// 更新连接计数
-	if config, ok := ps.config.(*ExtendedProxyConfig); ok {
-		config.Status.mutex.Lock()
-		config.Status.ConnectionCount++
-		config.Status.mutex.Unlock()
+	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok {
+		if ps.portID != "" {
+			portConfig := extConfig.GetProxyPort(ps.portID)
+			if portConfig != nil {
+				portConfig.Status.mutex.Lock()
+				portConfig.Status.ConnectionCount++
+				portConfig.Status.mutex.Unlock()
+			}
+		} else {
+			// 兼容旧版本
+			extConfig.Status.mutex.Lock()
+			extConfig.Status.ConnectionCount++
+			extConfig.Status.mutex.Unlock()
+		}
 	}
 
 	// 设置读取超时
@@ -105,20 +153,18 @@ func (ps *ProxyServer) handleConnection(client net.Conn) {
 	}
 
 	// 验证代理认证
-	if !ps.authenticate(req) {
+	if !allowAnonymous && !ps.authenticate(req) {
 		ps.sendAuthRequired(client)
 		return
-	} else {
-		//client.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 	}
 
 	// 记录域名访问统计
-	if config, ok := ps.config.(*ExtendedProxyConfig); ok {
+	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok {
 		domain := req.Host
 		if strings.Contains(domain, ":") {
 			domain = strings.Split(domain, ":")[0]
 		}
-		config.StatsManager.RecordRequest(domain)
+		extConfig.StatsManager.RecordRequest(domain)
 	}
 
 	// 检查是否启用了代理转发
@@ -140,11 +186,6 @@ func (ps *ProxyServer) handleConnection(client net.Conn) {
 
 // 验证用户认证
 func (ps *ProxyServer) authenticate(req *http.Request) bool {
-	// 检查是否允许匿名访问
-	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok && extConfig.AllowAnonymous {
-		return true
-	}
-
 	// 获取Proxy-Authorization头
 	authHeader := req.Header.Get("Proxy-Authorization")
 	if authHeader == "" {
@@ -171,7 +212,15 @@ func (ps *ProxyServer) authenticate(req *http.Request) bool {
 
 	username, password := pair[0], pair[1]
 
-	// 验证凭证
+	// 首先检查端口专用用户
+	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok && ps.portID != "" {
+		portConfig := extConfig.GetProxyPort(ps.portID)
+		if portConfig != nil && portConfig.ValidateUser(username, password) {
+			return true
+		}
+	}
+
+	// 然后检查全局用户
 	var credStore *CredentialStore
 	if config, ok := ps.config.(ProxyConfig); ok {
 		credStore = config.CredStore
@@ -229,6 +278,55 @@ func (ps *ProxyServer) handleHTTP(client net.Conn, req *http.Request, reader *bu
 	req.Header.Del("Proxy-Authorization")
 	req.Header.Del("Proxy-Connection")
 	// req.Header.Set("Connection", "close")
+
+	// 检查是否需要认证
+	var allowAnonymous bool
+	if _, ok := ps.config.(ProxyConfig); ok {
+		// 使用基本配置
+	} else if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok {
+		// 如果是多端口配置，使用对应端口的配置
+		if ps.portID != "" {
+			portConfig := extConfig.GetProxyPort(ps.portID)
+			if portConfig != nil {
+				allowAnonymous = portConfig.AllowAnonymous
+			}
+		} else {
+			// 兼容旧版本
+			allowAnonymous = extConfig.AllowAnonymous
+		}
+	}
+
+	// 如果不允许匿名访问，则需要认证
+	if !allowAnonymous && !ps.authenticate(req) {
+		// 发送认证失败响应
+		authRequired := "HTTP/1.1 407 Proxy Authentication Required\r\n" +
+			"Proxy-Authenticate: Basic realm=\"Proxy\"\r\n" +
+			"Content-Length: 0\r\n\r\n"
+		client.Write([]byte(authRequired))
+		return
+	}
+
+	// 记录域名访问统计
+	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok {
+		domain := req.Host
+		if strings.Contains(domain, ":") {
+			domain = strings.Split(domain, ":")[0]
+		}
+		extConfig.StatsManager.RecordRequest(domain)
+	}
+
+	// 检查是否启用了代理转发
+	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok && extConfig.UseForwardProxy {
+		// 使用代理转发处理请求
+		ps.handleProxyForwarding(client, req, reader)
+		return
+	}
+
+	// 处理CONNECT方法（HTTPS代理）
+	if req.Method == http.MethodConnect {
+		ps.handleHTTPS(client, req)
+		return
+	}
 
 	// 连接到目标服务器
 	log.Printf("处理HTTP请求: %s", req.URL.Host)
@@ -297,20 +395,34 @@ func (ps *ProxyServer) tunnel(client, target net.Conn) {
 	wg.Wait()
 }
 
-// 处理转发到另一个代理服务器
+// 处理代理转发
 func (ps *ProxyServer) handleProxyForwarding(client net.Conn, req *http.Request, reader *bufio.Reader) {
-	// 获取远程代理服务器配置
 	var remoteProxyAddr, remoteProxyUsername, remoteProxyPassword string
+	var useForwardProxy bool
 
+	// 获取代理转发设置
 	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok {
-		remoteProxyAddr = extConfig.RemoteProxyAddr
-		remoteProxyUsername = extConfig.RemoteProxyUser
-		remoteProxyPassword = extConfig.RemoteProxyPass
-	} else {
-		// 使用默认值
-		remoteProxyAddr = "127.0.0.1:7890"
-		remoteProxyUsername = "username"
-		remoteProxyPassword = "admin"
+		if ps.portID != "" {
+			portConfig := extConfig.GetProxyPort(ps.portID)
+			if portConfig != nil && portConfig.UseForwardProxy {
+				useForwardProxy = true
+				remoteProxyAddr = portConfig.RemoteProxyAddr
+				remoteProxyUsername = portConfig.RemoteProxyUser
+				remoteProxyPassword = portConfig.RemoteProxyPass
+			}
+		} else if extConfig.UseForwardProxy {
+			// 兼容旧版本
+			useForwardProxy = true
+			remoteProxyAddr = extConfig.RemoteProxyAddr
+			remoteProxyUsername = extConfig.RemoteProxyUser
+			remoteProxyPassword = extConfig.RemoteProxyPass
+		}
+	}
+
+	// 如果没有启用代理转发，直接返回
+	if !useForwardProxy || remoteProxyAddr == "" {
+		log.Printf("代理转发未启用或远程代理地址为空")
+		return
 	}
 
 	log.Printf("转发请求到远程代理: %s", remoteProxyAddr)

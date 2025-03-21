@@ -14,16 +14,20 @@ document.addEventListener('DOMContentLoaded', function() {
     const addUserForm = document.getElementById('add-user-form');
     const settingsForm = document.getElementById('settings-form');
     const resetStatsBtn = document.getElementById('reset-stats');
+    const addPortForm = document.getElementById('add-port-form');
+    const portsList = document.getElementById('ports-list');
     
     // 初始化页面
     updateProxyStatus();
     loadUsers();
     loadSettings();
     loadStats();
+    loadProxyPorts();
     
     // 设置定时刷新
     setInterval(updateProxyStatus, 5000);
     setInterval(loadStats, 10000);
+    setInterval(loadProxyPorts, 5000);
     
     // 监听无需认证复选框变化
     document.getElementById('no-auth-user').addEventListener('change', function() {
@@ -167,6 +171,47 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
+    // 处理添加代理端口
+    addPortForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const listenAddr = document.getElementById('new-port-addr').value;
+        const allowAnonymous = document.getElementById('new-port-anonymous').checked;
+        
+        // 验证监听地址
+        if (!listenAddr.trim()) {
+            alert('监听地址不能为空');
+            return;
+        }
+        
+        fetch('/api/proxy/ports', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + localStorage.getItem('token')
+            },
+            body: JSON.stringify({
+                listen_addr: listenAddr,
+                allow_anonymous: allowAnonymous
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // 重置表单
+                addPortForm.reset();
+                // 刷新端口列表
+                loadProxyPorts();
+            } else {
+                alert('添加代理端口失败: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('添加代理端口请求失败:', error);
+            alert('添加代理端口请求失败，请稍后重试');
+        });
+    });
+    
     // 处理保存设置
     settingsForm.addEventListener('submit', function(e) {
         e.preventDefault();
@@ -197,7 +242,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 proxy_port: proxyPort,
                 web_port: webPort,
                 admin_username: adminUsername,
-                admin_password: adminPassword || undefined,
+                admin_password: adminPassword,
                 use_forward_proxy: useForwardProxy,
                 allow_anonymous: allowAnonymous,
                 remote_proxy_addr: remoteProxyAddr,
@@ -208,10 +253,13 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                alert('设置已保存，部分设置可能需要重启服务器才能生效');
-                // 重置密码字段
-                document.getElementById('admin-password').value = '';
-                document.getElementById('remote-proxy-pass').value = '';
+                alert('设置已保存');
+                // 刷新设置
+                loadSettings();
+                // 刷新代理状态
+                updateProxyStatus();
+                // 刷新端口列表
+                loadProxyPorts();
             } else {
                 alert('保存设置失败: ' + data.message);
             }
@@ -246,7 +294,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // 更新代理服务器状态
+    // 更新代理状态
     function updateProxyStatus() {
         fetch('/api/proxy/status', {
             headers: {
@@ -446,5 +494,512 @@ document.addEventListener('DOMContentLoaded', function() {
         .catch(error => {
             console.error('获取统计信息失败:', error);
         });
+    }
+    
+    // 加载代理端口列表
+    function loadProxyPorts() {
+        fetch('/api/proxy/ports', {
+            headers: {
+                'Authorization': 'Bearer ' + localStorage.getItem('token')
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const portsList = document.getElementById('ports-list');
+                portsList.innerHTML = '';
+                
+                data.data.forEach(port => {
+                    const row = document.createElement('tr');
+                    
+                    // 监听地址
+                    const addrCell = document.createElement('td');
+                    addrCell.textContent = port.listen_addr;
+                    
+                    // 状态
+                    const statusCell = document.createElement('td');
+                    const statusSpan = document.createElement('span');
+                    statusSpan.textContent = port.running ? '运行中' : '已停止';
+                    statusSpan.className = 'status-indicator ' + (port.running ? 'running' : 'stopped');
+                    statusCell.appendChild(statusSpan);
+                    
+                    // 连接数
+                    const connCell = document.createElement('td');
+                    connCell.textContent = port.connection_count;
+                    
+                    // 匿名访问
+                    const anonCell = document.createElement('td');
+                    anonCell.textContent = port.allow_anonymous ? '允许' : '不允许';
+                    
+                    // 操作按钮
+                    const actionCell = document.createElement('td');
+                    actionCell.className = 'port-actions';
+                    
+                    // 启动/停止按钮
+                    if (port.running) {
+                        const stopBtn = document.createElement('button');
+                        stopBtn.textContent = '停止';
+                        stopBtn.className = 'btn-stop';
+                        stopBtn.addEventListener('click', function() {
+                            stopProxyPort(port.id);
+                        });
+                        actionCell.appendChild(stopBtn);
+                    } else {
+                        const startBtn = document.createElement('button');
+                        startBtn.textContent = '启动';
+                        startBtn.className = 'btn-start';
+                        startBtn.disabled = !port.enabled;
+                        startBtn.addEventListener('click', function() {
+                            startProxyPort(port.id);
+                        });
+                        actionCell.appendChild(startBtn);
+                    }
+                    
+                    // 编辑按钮
+                    if (!port.running) {
+                        const editBtn = document.createElement('button');
+                        editBtn.textContent = '编辑';
+                        editBtn.className = 'btn-edit';
+                        editBtn.addEventListener('click', function() {
+                            editProxyPort(port);
+                        });
+                        actionCell.appendChild(editBtn);
+                    }
+                    
+                    // 删除按钮 (不允许删除默认端口)
+                    if (port.id !== 'default' && !port.running) {
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.textContent = '删除';
+                        deleteBtn.className = 'btn-delete';
+                        deleteBtn.addEventListener('click', function() {
+                            deleteProxyPort(port.id);
+                        });
+                        actionCell.appendChild(deleteBtn);
+                    }
+                    
+                    row.appendChild(addrCell);
+                    row.appendChild(statusCell);
+                    row.appendChild(connCell);
+                    row.appendChild(anonCell);
+                    row.appendChild(actionCell);
+                    
+                    portsList.appendChild(row);
+                });
+            }
+        })
+        .catch(error => {
+            console.error('获取代理端口列表失败:', error);
+        });
+    }
+    
+    // 启动代理端口
+    function startProxyPort(id) {
+        fetch(`/api/proxy/ports/${id}/start`, {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer ' + localStorage.getItem('token')
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                loadProxyPorts();
+            } else {
+                alert('启动代理端口失败: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('启动代理端口请求失败:', error);
+            alert('启动代理端口请求失败，请稍后重试');
+        });
+    }
+    
+    // 停止代理端口
+    function stopProxyPort(id) {
+        fetch(`/api/proxy/ports/${id}/stop`, {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer ' + localStorage.getItem('token')
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                loadProxyPorts();
+            } else {
+                alert('停止代理端口失败: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('停止代理端口请求失败:', error);
+            alert('停止代理端口请求失败，请稍后重试');
+        });
+    }
+    
+    // 编辑代理端口
+    function editProxyPort(port) {
+        // 创建编辑对话框
+        const dialogHTML = `
+            <div class="modal-overlay port-detail-modal" id="edit-port-modal">
+                <div class="modal-content">
+                    <h3>管理代理端口 - ${port.listen_addr}</h3>
+                    
+                    <div class="port-detail-tabs">
+                        <div class="port-detail-tab active" data-tab="basic">基本设置</div>
+                        <div class="port-detail-tab" data-tab="users">用户管理</div>
+                        <div class="port-detail-tab" data-tab="forward">代理转发</div>
+                    </div>
+                    
+                    <div class="port-detail-panel active" id="basic-panel">
+                        <div class="port-info">
+                            <div class="port-info-item">
+                                <div class="port-info-label">端口ID:</div>
+                                <div class="port-info-value">${port.id}</div>
+                            </div>
+                            <div class="port-info-item">
+                                <div class="port-info-label">连接数:</div>
+                                <div class="port-info-value">${port.status ? port.status.connection_count : 0}</div>
+                            </div>
+                        </div>
+                        
+                        <form id="edit-port-basic-form" onsubmit="return false;">
+                            <input type="hidden" id="port-id" value="${port.id}">
+                            <div class="form-group">
+                                <label for="edit-port-addr">监听地址 (格式: IP:端口)</label>
+                                <input type="text" id="edit-port-addr" name="listen_addr" value="${port.listen_addr}" required>
+                            </div>
+                            <div class="form-group checkbox-group">
+                                <input type="checkbox" id="edit-port-enabled" name="enabled" ${port.enabled ? 'checked' : ''}>
+                                <label for="edit-port-enabled">启用</label>
+                            </div>
+                            <div class="form-group checkbox-group">
+                                <input type="checkbox" id="edit-port-anonymous" name="allow_anonymous" ${port.allow_anonymous ? 'checked' : ''}>
+                                <label for="edit-port-anonymous">允许匿名访问 (不需要账号密码)</label>
+                            </div>
+                            <button type="button" id="save-port-basic" class="btn-save">保存基本设置</button>
+                        </form>
+                    </div>
+                    
+                    <div class="port-detail-panel" id="users-panel">
+                        <h4>端口专用用户</h4>
+                        <p>您可以为此端口添加专用的用户账号，这些账号只能通过此端口访问代理服务。</p>
+                        
+                        <table class="port-users-table">
+                            <thead>
+                                <tr>
+                                    <th>用户名</th>
+                                    <th>密码</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="port-users-list">
+                                <!-- 用户列表将通过JavaScript动态生成 -->
+                                <tr>
+                                    <td colspan="3" style="text-align: center;">暂无专用用户</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        
+                        <form id="add-port-user-form">
+                            <input type="hidden" id="port-id" value="${port.id}">
+                            <h4>添加专用用户</h4>
+                            <div class="form-group">
+                                <label for="port-new-username">用户名</label>
+                                <input type="text" id="port-new-username" name="username" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="port-new-password">密码</label>
+                                <input type="password" id="port-new-password" name="password" required>
+                            </div>
+                            <div class="form-group checkbox-group">
+                                <input type="checkbox" id="port-no-auth-user" name="no-auth-user">
+                                <label for="port-no-auth-user">无需认证的用户（不需要账号密码）</label>
+                            </div>
+                            <button type="submit" class="btn-add">添加用户</button>
+                        </form>
+                    </div>
+                    
+                    <div class="port-detail-panel" id="forward-panel">
+                        <h4>代理转发设置</h4>
+                        <p>您可以将此端口的请求转发到另一个代理服务器。</p>
+                        
+                        <form id="edit-port-forward-form">
+                            <div class="form-group checkbox-group">
+                                <input type="checkbox" id="port-use-forward-proxy" name="use_forward_proxy">
+                                <label for="port-use-forward-proxy">启用代理转发</label>
+                            </div>
+                            
+                            <div class="proxy-forward-settings" id="port-forward-settings">
+                                <div class="form-group">
+                                    <label for="port-remote-proxy-addr">远程代理地址 (格式: IP:端口)</label>
+                                    <input type="text" id="port-remote-proxy-addr" name="remote_proxy_addr" placeholder="例如: 160.20.18.17:3989">
+                                </div>
+                                <div class="form-group">
+                                    <label for="port-remote-proxy-user">远程代理用户名</label>
+                                    <input type="text" id="port-remote-proxy-user" name="remote_proxy_user" placeholder="例如: admin">
+                                </div>
+                                <div class="form-group">
+                                    <label for="port-remote-proxy-pass">远程代理密码</label>
+                                    <input type="password" id="port-remote-proxy-pass" name="remote_proxy_pass" placeholder="输入远程代理密码">
+                                </div>
+                            </div>
+                            
+                            <button type="submit" class="btn-save">保存转发设置</button>
+                        </form>
+                    </div>
+                    
+                    <div class="modal-actions">
+                        <button class="btn-cancel" id="close-port-modal">关闭</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // 添加对话框到DOM
+        document.body.insertAdjacentHTML('beforeend', dialogHTML);
+        
+        // 获取对话框元素
+        const modal = document.getElementById('edit-port-modal');
+        
+        // 关闭按钮事件
+        document.getElementById('close-port-modal').addEventListener('click', function() {
+            modal.remove();
+        });
+        
+        // 选项卡切换
+        const tabs = document.querySelectorAll('.port-detail-tab');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', function() {
+                const tabId = this.getAttribute('data-tab');
+                
+                // 更新活动选项卡
+                tabs.forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                
+                // 显示对应面板
+                const panels = document.querySelectorAll('.port-detail-panel');
+                panels.forEach(panel => {
+                    if (panel.id === tabId + '-panel') {
+                        panel.classList.add('active');
+                    } else {
+                        panel.classList.remove('active');
+                    }
+                });
+            });
+        });
+        
+        // 监听无需认证复选框变化
+        document.getElementById('port-no-auth-user').addEventListener('change', function() {
+            const passwordInput = document.getElementById('port-new-password');
+            if (this.checked) {
+                passwordInput.disabled = true;
+                passwordInput.required = false;
+                passwordInput.value = '';
+            } else {
+                passwordInput.disabled = false;
+                passwordInput.required = true;
+            }
+        });
+        
+        // 处理添加端口用户表单提交
+        document.getElementById('add-port-user-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const portId = document.getElementById('port-id').value;
+            const username = document.getElementById('port-new-username').value;
+            const password = document.getElementById('port-new-password').value;
+            const noAuth = document.getElementById('port-no-auth-user').checked;
+            
+            // 验证用户名
+            if (!username.trim()) {
+                alert('用户名不能为空');
+                return;
+            }
+            
+            // 如果未选择"无需认证"，但未填写密码，则提示错误
+            if (!noAuth && !password.trim()) {
+                alert('请输入用户密码');
+                return;
+            }
+            
+            fetch(`/api/proxy/ports/${portId}/users`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + localStorage.getItem('token')
+                },
+                body: JSON.stringify({
+                    username: username,
+                    password: password,
+                    no_auth: noAuth
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // 清空表单
+                    document.getElementById('port-new-username').value = '';
+                    document.getElementById('port-new-password').value = '';
+                    document.getElementById('port-no-auth-user').checked = false;
+                    
+                    // 刷新用户列表
+                    loadPortUsers(portId);
+                    alert('用户已添加');
+                } else {
+                    alert('添加用户失败: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('添加用户请求失败:', error);
+                alert('添加用户请求失败，请稍后重试');
+            });
+        });
+        
+        // 处理基本设置保存
+        document.getElementById('save-port-basic').addEventListener('click', function() {
+            const portId = document.getElementById('port-id').value;
+            const listenAddr = document.getElementById('edit-port-addr').value;
+            const enabled = document.getElementById('edit-port-enabled').checked;
+            const allowAnonymous = document.getElementById('edit-port-anonymous').checked;
+            
+            // 验证监听地址
+            if (!listenAddr.trim()) {
+                alert('监听地址不能为空');
+                return;
+            }
+            
+            fetch(`/api/proxy/ports/${portId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + localStorage.getItem('token')
+                },
+                body: JSON.stringify({
+                    listen_addr: listenAddr,
+                    enabled: enabled,
+                    allow_anonymous: allowAnonymous
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('基本设置已保存');
+                    // 刷新端口列表
+                    loadProxyPorts();
+                } else {
+                    alert('更新代理端口失败: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('更新代理端口请求失败:', error);
+                alert('更新代理端口请求失败，请稍后重试');
+            });
+        });
+        
+        // 加载端口专用用户
+        loadPortUsers(port.id);
+    }
+    
+    // 加载端口专用用户
+    function loadPortUsers(portId) {
+        fetch(`/api/proxy/ports/${portId}/users`, {
+            headers: {
+                'Authorization': 'Bearer ' + localStorage.getItem('token')
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const usersList = document.getElementById('port-users-list');
+                usersList.innerHTML = '';
+                
+                if (data.data.length === 0) {
+                    const row = document.createElement('tr');
+                    const cell = document.createElement('td');
+                    cell.colSpan = 3;
+                    cell.style.textAlign = 'center';
+                    cell.textContent = '暂无专用用户';
+                    row.appendChild(cell);
+                    usersList.appendChild(row);
+                } else {
+                    data.data.forEach(user => {
+                        const row = document.createElement('tr');
+                        
+                        const usernameCell = document.createElement('td');
+                        usernameCell.textContent = user.username;
+                        
+                        const passwordCell = document.createElement('td');
+                        passwordCell.textContent = user.no_auth ? '无需密码' : '******';
+                        
+                        const actionCell = document.createElement('td');
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.textContent = '删除';
+                        deleteBtn.className = 'btn-delete';
+                        deleteBtn.addEventListener('click', function() {
+                            deletePortUser(portId, user.username);
+                        });
+                        actionCell.appendChild(deleteBtn);
+                        
+                        row.appendChild(usernameCell);
+                        row.appendChild(passwordCell);
+                        row.appendChild(actionCell);
+                        
+                        usersList.appendChild(row);
+                    });
+                }
+            }
+        })
+        .catch(error => {
+            console.error('获取端口用户列表失败:', error);
+        });
+    }
+    
+    // 删除端口专用用户
+    function deletePortUser(portId, username) {
+        if (confirm(`确定要删除用户 "${username}" 吗？`)) {
+            fetch(`/api/proxy/ports/${portId}/users/${username}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': 'Bearer ' + localStorage.getItem('token')
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    loadPortUsers(portId);
+                    alert('用户已删除');
+                } else {
+                    alert('删除用户失败: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('删除用户请求失败:', error);
+                alert('删除用户请求失败，请稍后重试');
+            });
+        }
+    }
+    
+    // 删除代理端口
+    function deleteProxyPort(id) {
+        if (confirm('确定要删除此代理端口吗？')) {
+            fetch(`/api/proxy/ports/${id}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': 'Bearer ' + localStorage.getItem('token')
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    loadProxyPorts();
+                } else {
+                    alert('删除代理端口失败: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('删除代理端口请求失败:', error);
+                alert('删除代理端口请求失败，请稍后重试');
+            });
+        }
     }
 });
