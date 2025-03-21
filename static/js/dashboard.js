@@ -900,6 +900,14 @@ document.addEventListener('DOMContentLoaded', function() {
             const remoteProxyUser = document.getElementById('port-remote-proxy-user').value;
             const remoteProxyPass = document.getElementById('port-remote-proxy-pass').value;
             
+            console.log("保存转发设置:", {
+                portId,
+                useForwardProxy,
+                remoteProxyAddr,
+                remoteProxyUser,
+                remoteProxyPass: remoteProxyPass ? "已设置" : "未设置"
+            });
+            
             // 如果启用转发代理但未填写代理地址，显示提示
             if (useForwardProxy && !remoteProxyAddr) {
                 alert('启用代理转发时，远程代理地址不能为空');
@@ -919,10 +927,16 @@ document.addEventListener('DOMContentLoaded', function() {
                     remote_proxy_pass: remoteProxyPass
                 })
             })
-            .then(response => response.json())
+            .then(response => {
+                console.log("响应状态:", response.status);
+                return response.json();
+            })
             .then(data => {
+                console.log("响应数据:", data);
                 if (data.success) {
                     alert('代理转发设置已保存');
+                    // 刷新端口列表以显示最新状态
+                    loadProxyPorts();
                 } else {
                     alert('更新代理转发设置失败: ' + data.message);
                 }

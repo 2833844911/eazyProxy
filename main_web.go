@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -1017,7 +1018,7 @@ func handleDeletePortUser(c *gin.Context) {
 // 处理获取端口代理转发设置
 func handleGetPortForward(c *gin.Context) {
 	portID := c.Param("id")
-
+	
 	port := globalConfig.GetProxyPort(portID)
 	if port == nil {
 		c.JSON(http.StatusNotFound, gin.H{
@@ -1026,13 +1027,14 @@ func handleGetPortForward(c *gin.Context) {
 		})
 		return
 	}
-
+	
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
 			"use_forward_proxy": port.UseForwardProxy,
 			"remote_proxy_addr": port.RemoteProxyAddr,
 			"remote_proxy_user": port.RemoteProxyUser,
+			// 不返回密码，保护安全
 		},
 	})
 }
@@ -1040,7 +1042,7 @@ func handleGetPortForward(c *gin.Context) {
 // 处理更新端口代理转发设置
 func handleUpdatePortForward(c *gin.Context) {
 	portID := c.Param("id")
-
+	
 	port := globalConfig.GetProxyPort(portID)
 	if port == nil {
 		c.JSON(http.StatusNotFound, gin.H{
@@ -1049,14 +1051,14 @@ func handleUpdatePortForward(c *gin.Context) {
 		})
 		return
 	}
-
+	
 	var req struct {
 		UseForwardProxy bool   `json:"use_forward_proxy"`
 		RemoteProxyAddr string `json:"remote_proxy_addr"`
 		RemoteProxyUser string `json:"remote_proxy_user"`
 		RemoteProxyPass string `json:"remote_proxy_pass"`
 	}
-
+	
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -1064,7 +1066,7 @@ func handleUpdatePortForward(c *gin.Context) {
 		})
 		return
 	}
-
+	
 	// 验证远程代理地址（如果启用了代理转发）
 	if req.UseForwardProxy && req.RemoteProxyAddr == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -1073,19 +1075,41 @@ func handleUpdatePortForward(c *gin.Context) {
 		})
 		return
 	}
-
+	
 	// 更新设置
 	port.UseForwardProxy = req.UseForwardProxy
 	port.RemoteProxyAddr = req.RemoteProxyAddr
 	port.RemoteProxyUser = req.RemoteProxyUser
-
+	
 	// 只有在提供了新密码时才更新密码
 	if req.RemoteProxyPass != "" {
 		port.RemoteProxyPass = req.RemoteProxyPass
 	}
-
+	
+	// 保存配置到文件
+	saveConfig()
+	
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "代理转发设置已更新",
 	})
+}
+
+// 保存配置到文件
+func saveConfig() {
+	// 将配置序列化为JSON
+	configData, err := json.MarshalIndent(globalConfig, "", "  ")
+	if err != nil {
+		log.Printf("序列化配置失败: %v", err)
+		return
+	}
+	
+	// 写入配置文件
+	err = os.WriteFile("config.json", configData, 0644)
+	if err != nil {
+		log.Printf("保存配置文件失败: %v", err)
+		return
+	}
+	
+	log.Println("配置已保存到文件")
 }
