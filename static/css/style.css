@@ -422,3 +422,235 @@ body {
     margin: 0;
     font-weight: normal;
 }
+
+/* 多端口管理样式 */
+.ports-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.ports-list-container {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    padding: 20px;
+    overflow: auto;
+}
+
+.ports-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.ports-table th, .ports-table td {
+    border: 1px solid #f0f0f0;
+    padding: 12px;
+    text-align: left;
+}
+
+.ports-table th {
+    background-color: #fafafa;
+    font-weight: 500;
+}
+
+.ports-table tr:hover {
+    background-color: #f5f5f5;
+}
+
+.port-actions {
+    display: flex;
+    gap: 5px;
+}
+
+.btn-start {
+    background-color: #52c41a;
+    color: white;
+    border: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.btn-start:hover {
+    background-color: #73d13d;
+}
+
+.btn-start:disabled {
+    background-color: #d9d9d9;
+    cursor: not-allowed;
+}
+
+.btn-stop {
+    background-color: #f5222d;
+    color: white;
+    border: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.btn-stop:hover {
+    background-color: #ff4d4f;
+}
+
+.btn-edit {
+    background-color: #1890ff;
+    color: white;
+    border: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.btn-edit:hover {
+    background-color: #40a9ff;
+}
+
+.add-port-form {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    padding: 20px;
+}
+
+.add-port-form h3 {
+    margin-bottom: 16px;
+    color: #1890ff;
+    border-bottom: 1px solid #f0f0f0;
+    padding-bottom: 10px;
+}
+
+/* 模态对话框样式 */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    padding: 24px;
+    width: 500px;
+    max-width: 90%;
+}
+
+.modal-content h3 {
+    margin-bottom: 16px;
+    color: #1890ff;
+    border-bottom: 1px solid #f0f0f0;
+    padding-bottom: 10px;
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.btn-cancel {
+    background-color: #f5f5f5;
+    color: #333;
+    border: 1px solid #d9d9d9;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.btn-cancel:hover {
+    background-color: #e8e8e8;
+}
+
+/* 端口详情模态框 */
+.port-detail-modal .modal-content {
+    width: 700px;
+}
+
+.port-detail-tabs {
+    display: flex;
+    border-bottom: 1px solid #f0f0f0;
+    margin-bottom: 20px;
+}
+
+.port-detail-tab {
+    padding: 10px 20px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.3s;
+}
+
+.port-detail-tab.active {
+    color: #1890ff;
+    border-bottom-color: #1890ff;
+}
+
+.port-detail-panel {
+    display: none;
+}
+
+.port-detail-panel.active {
+    display: block;
+}
+
+.port-info {
+    margin-bottom: 20px;
+}
+
+.port-info-item {
+    display: flex;
+    margin-bottom: 10px;
+}
+
+.port-info-label {
+    width: 120px;
+    font-weight: 500;
+    color: #666;
+}
+
+.port-info-value {
+    flex: 1;
+}
+
+/* 用户管理表格 */
+.port-users-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 15px;
+}
+
+.port-users-table th, .port-users-table td {
+    border: 1px solid #f0f0f0;
+    padding: 10px;
+    text-align: left;
+}
+
+.port-users-table th {
+    background-color: #fafafa;
+}
+
+/* 代理转发设置 */
+.proxy-forward-settings {
+    background-color: #f9f9f9;
+    border-radius: 6px;
+    padding: 15px;
+    margin-top: 15px;
+}
+
+.proxy-forward-settings.disabled {
+    opacity: 0.7;
+    pointer-events: none;
+}

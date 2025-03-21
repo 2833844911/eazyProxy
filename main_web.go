@@ -29,6 +29,10 @@ var proxyMutex sync.Mutex
 var proxyRunning bool
 var proxyStopChan chan struct{}
 
+// 多端口代理服务器实例映射，key为端口ID
+var proxyServers = make(map[string]*ProxyServer)
+var proxyRunningStatus = make(map[string]bool)
+
 // 初始化函数
 func init() {
 	// 生成随机JWT密钥
@@ -87,6 +91,24 @@ func main() {
 			// 统计信息
 			auth.GET("/stats", handleGetStats)
 			auth.POST("/stats/reset", handleResetStats)
+
+			// 多端口管理API
+			auth.GET("/proxy/ports", handleGetProxyPorts)
+			auth.POST("/proxy/ports", handleAddProxyPort)
+			auth.GET("/proxy/ports/:id", handleGetProxyPort)
+			auth.PUT("/proxy/ports/:id", handleUpdateProxyPort)
+			auth.DELETE("/proxy/ports/:id", handleDeleteProxyPort)
+			auth.POST("/proxy/ports/:id/start", handleStartProxyPort)
+			auth.POST("/proxy/ports/:id/stop", handleStopProxyPort)
+
+			// 端口用户管理API
+			auth.GET("/proxy/ports/:id/users", handleGetPortUsers)
+			auth.POST("/proxy/ports/:id/users", handleAddPortUser)
+			auth.DELETE("/proxy/ports/:id/users/:username", handleDeletePortUser)
+
+			// 端口代理转发设置API
+			auth.GET("/proxy/ports/:id/forward", handleGetPortForward)
+			auth.POST("/proxy/ports/:id/forward", handleUpdatePortForward)
 		}
 	}
 
@@ -105,6 +127,9 @@ func main() {
 
 	// 启动代理服务器
 	startProxyServer()
+
+	// 启动默认代理服务器
+	startProxyPort("default")
 
 	// 等待信号
 	select {}
@@ -300,6 +325,7 @@ func handleGetUsers(c *gin.Context) {
 	for username := range globalConfig.CredStore.credentials {
 		users = append(users, gin.H{
 			"username": username,
+			"no_auth":  globalConfig.CredStore.IsNoAuthUser(username),
 		})
 	}
 
@@ -315,6 +341,7 @@ func handleAddUser(c *gin.Context) {
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		NoAuth   bool   `json:"no_auth"`
 	}
 
 	if err := c.BindJSON(&req); err != nil {
@@ -325,17 +352,31 @@ func handleAddUser(c *gin.Context) {
 		return
 	}
 
-	// 验证用户名和密码
-	if req.Username == "" || req.Password == "" {
+	// 验证用户名
+	if req.Username == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "用户名和密码不能为空",
+			"message": "用户名不能为空",
+		})
+		return
+	}
+
+	// 如果不是无认证用户，则验证密码
+	if !req.NoAuth && req.Password == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "密码不能为空",
 		})
 		return
 	}
 
 	// 添加用户
 	globalConfig.CredStore.AddCredential(req.Username, req.Password)
+
+	// 如果是无认证用户，记录到无认证用户列表
+	if req.NoAuth {
+		globalConfig.CredStore.AddNoAuthUser(req.Username)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -377,6 +418,10 @@ func handleGetSettings(c *gin.Context) {
 			"web_port":          globalConfig.WebPort,
 			"admin_username":    globalConfig.AdminUsername,
 			"use_forward_proxy": globalConfig.UseForwardProxy,
+			"allow_anonymous":   globalConfig.AllowAnonymous,
+			"remote_proxy_addr": globalConfig.RemoteProxyAddr,
+			"remote_proxy_user": globalConfig.RemoteProxyUser,
+			"remote_proxy_pass": globalConfig.RemoteProxyPass,
 		},
 	})
 }
@@ -390,6 +435,10 @@ func handleUpdateSettings(c *gin.Context) {
 		AdminUsername   string `json:"admin_username"`
 		AdminPassword   string `json:"admin_password"`
 		UseForwardProxy bool   `json:"use_forward_proxy"`
+		AllowAnonymous  bool   `json:"allow_anonymous"`
+		RemoteProxyAddr string `json:"remote_proxy_addr"`
+		RemoteProxyUser string `json:"remote_proxy_user"`
+		RemoteProxyPass string `json:"remote_proxy_pass"`
 	}
 
 	if err := c.BindJSON(&req); err != nil {
@@ -428,6 +477,15 @@ func handleUpdateSettings(c *gin.Context) {
 		return
 	}
 
+	// 如果启用了代理转发，验证远程代理地址
+	if req.UseForwardProxy && req.RemoteProxyAddr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "启用代理转发时，远程代理地址不能为空",
+		})
+		return
+	}
+
 	// 更新设置
 	proxyMutex.Lock()
 	defer proxyMutex.Unlock()
@@ -448,6 +506,20 @@ func handleUpdateSettings(c *gin.Context) {
 
 	// 更新代理转发设置
 	globalConfig.UseForwardProxy = req.UseForwardProxy
+
+	// 更新匿名访问设置
+	globalConfig.AllowAnonymous = req.AllowAnonymous
+
+	// 更新远程代理设置
+	if req.RemoteProxyAddr != "" {
+		globalConfig.RemoteProxyAddr = req.RemoteProxyAddr
+	}
+	if req.RemoteProxyUser != "" {
+		globalConfig.RemoteProxyUser = req.RemoteProxyUser
+	}
+	if req.RemoteProxyPass != "" {
+		globalConfig.RemoteProxyPass = req.RemoteProxyPass
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -480,77 +552,540 @@ func handleResetStats(c *gin.Context) {
 	})
 }
 
-// 启动代理服务器
-func startProxyServer() {
-	proxyMutex.Lock()
-	defer proxyMutex.Unlock()
+// 处理获取所有代理端口
+func handleGetProxyPorts(c *gin.Context) {
+	ports := globalConfig.GetAllProxyPorts()
 
-	if proxyRunning {
+	// 转换为JSON格式
+	result := make([]gin.H, 0, len(ports))
+	for _, port := range ports {
+		port.Status.mutex.RLock()
+		result = append(result, gin.H{
+			"id":               port.ID,
+			"listen_addr":      port.ListenAddr,
+			"enabled":          port.Enabled,
+			"running":          port.Status.Running,
+			"start_time":       port.Status.StartTime,
+			"connection_count": port.Status.ConnectionCount,
+			"allow_anonymous":  port.AllowAnonymous,
+		})
+		port.Status.mutex.RUnlock()
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    result,
+	})
+}
+
+// 处理添加代理端口
+func handleAddProxyPort(c *gin.Context) {
+	var req struct {
+		ListenAddr     string `json:"listen_addr"`
+		AllowAnonymous bool   `json:"allow_anonymous"`
+	}
+
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的请求",
+		})
 		return
 	}
 
-	// 创建新的停止通道
-	proxyStopChan = make(chan struct{})
+	// 验证监听地址
+	if req.ListenAddr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "监听地址不能为空",
+		})
+		return
+	}
 
-	// 更新状态
-	globalConfig.Status.mutex.Lock()
-	globalConfig.Status.Running = true
-	globalConfig.Status.StartTime = time.Now()
-	globalConfig.Status.ConnectionCount = 0
-	globalConfig.Status.mutex.Unlock()
+	// 生成唯一ID
+	portID := fmt.Sprintf("port_%d", time.Now().UnixNano())
 
-	// 创建代理服务器
-	proxyServer = NewProxyServer(globalConfig)
+	// 创建新的端口配置
+	port := &ProxyPortConfig{
+		ID:              portID,
+		ListenAddr:      req.ListenAddr,
+		Enabled:         true,
+		Status:          &ProxyStatus{Running: false, StartTime: time.Time{}, ConnectionCount: 0, mutex: sync.RWMutex{}},
+		AllowAnonymous:  req.AllowAnonymous,
+		PortUsers:       make(map[string]string), // 初始化用户映射
+		NoAuthUsers:     make(map[string]bool),   // 初始化无需认证用户映射
+		usersMutex:      sync.RWMutex{},
+		UseForwardProxy: false,
+		RemoteProxyAddr: "",
+		RemoteProxyUser: "",
+		RemoteProxyPass: "",
+	}
+
+	// 添加到全局配置
+	globalConfig.AddProxyPort(port)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "代理端口已添加",
+		"data":    port,
+	})
+}
+
+// 处理获取单个代理端口
+func handleGetProxyPort(c *gin.Context) {
+	id := c.Param("id")
+
+	port := globalConfig.GetProxyPort(id)
+	if port == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "代理端口不存在",
+		})
+		return
+	}
+
+	port.Status.mutex.RLock()
+	result := gin.H{
+		"id":               port.ID,
+		"listen_addr":      port.ListenAddr,
+		"enabled":          port.Enabled,
+		"running":          port.Status.Running,
+		"start_time":       port.Status.StartTime,
+		"connection_count": port.Status.ConnectionCount,
+		"allow_anonymous":  port.AllowAnonymous,
+	}
+	port.Status.mutex.RUnlock()
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    result,
+	})
+}
+
+// 处理更新代理端口
+func handleUpdateProxyPort(c *gin.Context) {
+	id := c.Param("id")
+
+	port := globalConfig.GetProxyPort(id)
+	if port == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "端口不存在",
+		})
+		return
+	}
+
+	var req struct {
+		ListenAddr     string `json:"listen_addr"`
+		Enabled        bool   `json:"enabled"`
+		AllowAnonymous bool   `json:"allow_anonymous"`
+	}
+
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的请求",
+		})
+		return
+	}
+
+	// 验证监听地址
+	if req.ListenAddr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "监听地址不能为空",
+		})
+		return
+	}
+
+	// 检查是否需要重启代理
+	needRestart := port.Status.Running && (port.ListenAddr != req.ListenAddr || port.Enabled != req.Enabled)
+
+	// 如果需要重启，先停止代理
+	if needRestart {
+		stopProxyPort(id)
+	}
+
+	// 更新配置
+	port.ListenAddr = req.ListenAddr
+	port.Enabled = req.Enabled
+	port.AllowAnonymous = req.AllowAnonymous
+
+	// 如果需要重启且启用状态为true，则重新启动代理
+	if needRestart && req.Enabled {
+		go startProxyPort(id)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "代理端口已更新",
+	})
+}
+
+// 处理删除代理端口
+func handleDeleteProxyPort(c *gin.Context) {
+	id := c.Param("id")
+
+	// 不允许删除默认端口
+	if id == "default" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "不能删除默认端口",
+		})
+		return
+	}
+
+	port := globalConfig.GetProxyPort(id)
+	if port == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "代理端口不存在",
+		})
+		return
+	}
+
+	// 如果端口正在运行，需要先停止
+	if port.Status.Running {
+		stopProxyPort(id)
+	}
+
+	// 删除配置
+	globalConfig.DeleteProxyPort(id)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "代理端口已删除",
+	})
+}
+
+// 处理启动单个代理端口
+func handleStartProxyPort(c *gin.Context) {
+	id := c.Param("id")
+
+	port := globalConfig.GetProxyPort(id)
+	if port == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "代理端口不存在",
+		})
+		return
+	}
+
+	// 检查是否已启用
+	if !port.Enabled {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "该代理端口未启用",
+		})
+		return
+	}
+
+	// 检查是否已运行
+	if port.Status.Running {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "代理服务器已经在运行",
+		})
+		return
+	}
 
 	// 启动代理服务器
+	go startProxyPort(id)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "代理服务器已启动",
+	})
+}
+
+// 处理停止单个代理端口
+func handleStopProxyPort(c *gin.Context) {
+	id := c.Param("id")
+
+	port := globalConfig.GetProxyPort(id)
+	if port == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "代理端口不存在",
+		})
+		return
+	}
+
+	// 检查是否正在运行
+	if !port.Status.Running {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "代理服务器未运行",
+		})
+		return
+	}
+
+	// 停止代理服务器
+	stopProxyPort(id)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "代理服务器已停止",
+	})
+}
+
+// 启动单个代理端口
+func startProxyPort(id string) {
+	proxyMutex.Lock()
+	defer proxyMutex.Unlock()
+
+	// 检查是否已运行
+	if proxyRunningStatus[id] {
+		return
+	}
+
+	port := globalConfig.GetProxyPort(id)
+	if port == nil || !port.Enabled {
+		return
+	}
+
+	// 创建代理服务器
+	proxyServers[id] = NewProxyServer(globalConfig, id)
+
+	// 标记为运行中
+	proxyRunningStatus[id] = true
+
+	// 启动服务器
 	go func() {
-		log.Printf("启动HTTPS代理服务器，监听地址: %s\n", globalConfig.ListenAddr)
-		log.Printf("已配置用户: %d 个\n", len(globalConfig.CredStore.credentials))
+		log.Printf("启动HTTPS代理服务器，监听地址: %s (端口ID: %s)\n", port.ListenAddr, id)
 
-		// 标记为运行中
-		proxyRunning = true
-
-		// 启动服务器
-		err := proxyServer.Start()
+		err := proxyServers[id].Start()
 		if err != nil {
-			log.Printf("启动代理服务器失败: %v\n", err)
+			log.Printf("启动代理服务器失败: %v (端口ID: %s)\n", err, id)
 
 			// 更新状态
 			proxyMutex.Lock()
-			proxyRunning = false
-			globalConfig.Status.mutex.Lock()
-			globalConfig.Status.Running = false
-			globalConfig.Status.mutex.Unlock()
+			proxyRunningStatus[id] = false
+			port.Status.mutex.Lock()
+			port.Status.Running = false
+			port.Status.mutex.Unlock()
 			proxyMutex.Unlock()
 		}
 	}()
 }
 
-// 停止代理服务器
-func stopProxyServer() {
-	if !proxyRunning {
+// 停止单个代理端口
+func stopProxyPort(id string) {
+	proxyMutex.Lock()
+	defer proxyMutex.Unlock()
+
+	// 检查是否正在运行
+	if !proxyRunningStatus[id] {
 		return
 	}
 
-	// 关闭停止通道
-	close(proxyStopChan)
-
 	// 关闭TCP监听器
 	listenerMutex.Lock()
-	if proxyListener != nil {
-		proxyListener.Close()
-		proxyListener = nil
+	if listener, ok := proxyListeners[id]; ok && listener != nil {
+		listener.Close()
+		delete(proxyListeners, id)
 	}
 	listenerMutex.Unlock()
 
 	// 更新状态
-	proxyRunning = false
-	globalConfig.Status.mutex.Lock()
-	globalConfig.Status.Running = false
-	globalConfig.Status.mutex.Unlock()
+	proxyRunningStatus[id] = false
+
+	port := globalConfig.GetProxyPort(id)
+	if port != nil {
+		port.Status.mutex.Lock()
+		port.Status.Running = false
+		port.Status.mutex.Unlock()
+	}
 
 	// 等待一小段时间确保端口释放
 	time.Sleep(100 * time.Millisecond)
 
-	log.Printf("HTTPS代理服务器已停止\n")
+	log.Printf("HTTPS代理服务器已停止 (端口ID: %s)\n", id)
+}
+
+// 兼容旧版本的启动代理服务器函数
+func startProxyServer() {
+	startProxyPort("default")
+}
+
+// 兼容旧版本的停止代理服务器函数
+func stopProxyServer() {
+	stopProxyPort("default")
+}
+
+// 处理获取端口用户
+func handleGetPortUsers(c *gin.Context) {
+	portID := c.Param("id")
+
+	port := globalConfig.GetProxyPort(portID)
+	if port == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "端口不存在",
+		})
+		return
+	}
+
+	users := port.GetAllUsers()
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    users,
+	})
+}
+
+// 处理添加端口用户
+func handleAddPortUser(c *gin.Context) {
+	portID := c.Param("id")
+
+	port := globalConfig.GetProxyPort(portID)
+	if port == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "端口不存在",
+		})
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		NoAuth   bool   `json:"no_auth"`
+	}
+
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的请求",
+		})
+		return
+	}
+
+	// 验证用户名
+	if req.Username == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "用户名不能为空",
+		})
+		return
+	}
+
+	// 验证密码（如果不是无需认证的用户）
+	if !req.NoAuth && req.Password == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "密码不能为空",
+		})
+		return
+	}
+
+	// 添加用户
+	if req.NoAuth {
+		port.AddNoAuthUser(req.Username)
+	} else {
+		port.AddUser(req.Username, req.Password)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "用户已添加",
+	})
+}
+
+// 处理删除端口用户
+func handleDeletePortUser(c *gin.Context) {
+	portID := c.Param("id")
+	username := c.Param("username")
+
+	port := globalConfig.GetProxyPort(portID)
+	if port == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "端口不存在",
+		})
+		return
+	}
+
+	port.DeleteUser(username)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "用户已删除",
+	})
+}
+
+// 处理获取端口代理转发设置
+func handleGetPortForward(c *gin.Context) {
+	portID := c.Param("id")
+
+	port := globalConfig.GetProxyPort(portID)
+	if port == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "端口不存在",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"use_forward_proxy": port.UseForwardProxy,
+			"remote_proxy_addr": port.RemoteProxyAddr,
+			"remote_proxy_user": port.RemoteProxyUser,
+		},
+	})
+}
+
+// 处理更新端口代理转发设置
+func handleUpdatePortForward(c *gin.Context) {
+	portID := c.Param("id")
+
+	port := globalConfig.GetProxyPort(portID)
+	if port == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "端口不存在",
+		})
+		return
+	}
+
+	var req struct {
+		UseForwardProxy bool   `json:"use_forward_proxy"`
+		RemoteProxyAddr string `json:"remote_proxy_addr"`
+		RemoteProxyUser string `json:"remote_proxy_user"`
+		RemoteProxyPass string `json:"remote_proxy_pass"`
+	}
+
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的请求",
+		})
+		return
+	}
+
+	// 验证远程代理地址（如果启用了代理转发）
+	if req.UseForwardProxy && req.RemoteProxyAddr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "远程代理地址不能为空",
+		})
+		return
+	}
+
+	// 更新设置
+	port.UseForwardProxy = req.UseForwardProxy
+	port.RemoteProxyAddr = req.RemoteProxyAddr
+	port.RemoteProxyUser = req.RemoteProxyUser
+
+	// 只有在提供了新密码时才更新密码
+	if req.RemoteProxyPass != "" {
+		port.RemoteProxyPass = req.RemoteProxyPass
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "代理转发设置已更新",
+	})
 }

@@ -19,8 +19,7 @@
         <div class="dashboard-content">
             <div class="sidebar">
                 <ul class="nav-menu">
-                    <li class="active" data-tab="status">服务器状态</li>
-                    <li data-tab="users">用户管理</li>
+                    <li data-tab="ports"  data-tab="status">多端口管理</li>
                     <li data-tab="settings">系统设置</li>
                     <li data-tab="stats">访问统计</li>
                 </ul>
@@ -54,6 +53,43 @@
                     </div>
                 </div>
 
+                <!-- 多端口管理面板 -->
+                <div id="ports-panel" class="panel">
+                    <h2>多端口管理</h2>
+                    <div class="ports-container">
+                        <div class="ports-list-container">
+                            <table class="ports-table">
+                                <thead>
+                                    <tr>
+                                        <th>监听地址</th>
+                                        <th>状态</th>
+                                        <th>连接数</th>
+                                        <th>匿名访问</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ports-list">
+                                    <!-- 端口列表将通过JavaScript动态生成 -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="add-port-form">
+                            <h3>添加新端口</h3>
+                            <form id="add-port-form">
+                                <div class="form-group">
+                                    <label for="new-port-addr">监听地址 (格式: IP:端口)</label>
+                                    <input type="text" id="new-port-addr" name="listen_addr" placeholder="例如: 0.0.0.0:8082" required>
+                                </div>
+                                <div class="form-group checkbox-group">
+                                    <input type="checkbox" id="new-port-anonymous" name="allow_anonymous">
+                                    <label for="new-port-anonymous">允许匿名访问 (不需要账号密码)</label>
+                                </div>
+                                <button type="submit" class="btn-add">添加端口</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- 用户管理面板 -->
                 <div id="users-panel" class="panel">
                     <h2>用户管理</h2>
@@ -81,6 +117,10 @@
                                     <label for="new-password">密码</label>
                                     <input type="password" id="new-password" name="password" required>
                                 </div>
+                                <div class="form-group checkbox-group">
+                                    <input type="checkbox" id="no-auth-user" name="no-auth-user">
+                                    <label for="no-auth-user">无需认证的用户（不需要账号密码）</label>
+                                </div>
                                 <button type="submit" class="btn-add">添加用户</button>
                             </form>
                         </div>
@@ -92,7 +132,7 @@
                     <h2>系统设置</h2>
                     <form id="settings-form" class="settings-form">
                         <div class="form-group">
-                            <label for="proxy-port">代理服务器端口</label>
+                            <label for="proxy-port">默认代理服务器端口</label>
                             <input type="number" id="proxy-port" name="proxy-port" min="1" max="65535" value="8080" required>
                         </div>
                         <div class="form-group">
@@ -109,7 +149,25 @@
                         </div>
                         <div class="form-group checkbox-group">
                             <input type="checkbox" id="use-forward-proxy" name="use-forward-proxy">
-                            <label for="use-forward-proxy">启用代理转发 (转发到: admin:97b9de209470179e@60.204.138.17:3389)</label>
+                            <label for="use-forward-proxy">启用代理转发</label>
+                        </div>
+                        <div id="remote-proxy-settings" style="display: none; margin-left: 25px; border-left: 2px solid #1890ff; padding-left: 10px;">
+                            <div class="form-group">
+                                <label for="remote-proxy-addr">远程代理地址 (格式: IP:端口)</label>
+                                <input type="text" id="remote-proxy-addr" name="remote-proxy-addr" placeholder="例如: 160.20.18.17:3989">
+                            </div>
+                            <div class="form-group">
+                                <label for="remote-proxy-user">远程代理用户名</label>
+                                <input type="text" id="remote-proxy-user" name="remote-proxy-user" placeholder="例如: admin">
+                            </div>
+                            <div class="form-group">
+                                <label for="remote-proxy-pass">远程代理密码</label>
+                                <input type="password" id="remote-proxy-pass" name="remote-proxy-pass" placeholder="输入远程代理密码">
+                            </div>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" id="allow-anonymous" name="allow-anonymous">
+                            <label for="allow-anonymous">允许匿名访问 (不需要账号密码即可使用代理)</label>
                         </div>
                         <button type="submit" class="btn-save">保存设置</button>
                     </form>
