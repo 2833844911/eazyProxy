@@ -1,16 +1,17 @@
 package main
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 )
 
 // 代理服务器状态
 type ProxyStatus struct {
-	Running         bool      `json:"running"`
-	StartTime       time.Time `json:"start_time"`
-	ConnectionCount int       `json:"connection_count"`
-	mutex           sync.RWMutex
+	Running         bool         `json:"running"`
+	StartTime       time.Time    `json:"start_time"`
+	ConnectionCount int          `json:"connection_count"`
+	mutex           sync.RWMutex `json:"-"` // 不序列化互斥锁
 }
 
 // 单个代理端口配置
@@ -27,6 +28,23 @@ type ProxyPortConfig struct {
 	RemoteProxyAddr string            `json:"remote_proxy_addr"` // 远程代理地址
 	RemoteProxyUser string            `json:"remote_proxy_user"` // 远程代理用户名
 	RemoteProxyPass string            `json:"remote_proxy_pass"` // 远程代理密码
+}
+
+// 在反序列化后初始化互斥锁和映射
+func (pc *ProxyPortConfig) InitAfterUnmarshal() {
+	if pc.PortUsers == nil {
+		pc.PortUsers = make(map[string]string)
+	}
+	if pc.NoAuthUsers == nil {
+		pc.NoAuthUsers = make(map[string]bool)
+	}
+	if pc.Status == nil {
+		pc.Status = &ProxyStatus{
+			Running:         false,
+			StartTime:       time.Time{},
+			ConnectionCount: 0,
+		}
+	}
 }
 
 // 域名访问统计
@@ -312,4 +330,55 @@ func (pc *ProxyPortConfig) GetAllUsers() []map[string]interface{} {
 	}
 
 	return users
+}
+
+// 自定义 UnmarshalJSON 方法，用于在反序列化后初始化互斥锁和映射
+func (ec *ExtendedProxyConfig) UnmarshalJSON(data []byte) error {
+	// 创建一个临时结构体，与 ExtendedProxyConfig 相同但没有互斥锁字段
+	type TempConfig ExtendedProxyConfig
+	var temp TempConfig
+
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return err
+	}
+
+	// 复制值到原始结构体
+	*ec = ExtendedProxyConfig(temp)
+
+	// 初始化互斥锁和映射
+	ec.proxyPortsMutex = sync.RWMutex{}
+
+	if ec.ProxyPorts == nil {
+		ec.ProxyPorts = make(map[string]*ProxyPortConfig)
+	}
+
+	// 初始化每个端口配置
+	for _, port := range ec.ProxyPorts {
+		port.InitAfterUnmarshal()
+	}
+
+	// 初始化凭证存储
+	if ec.CredStore == nil {
+		ec.CredStore = NewCredentialStore()
+	}
+
+	// 初始化统计管理器
+	if ec.StatsManager == nil {
+		ec.StatsManager = NewStatsManager()
+	} else {
+		ec.StatsManager.mutex = sync.RWMutex{}
+	}
+
+	// 初始化状态
+	if ec.Status == nil {
+		ec.Status = &ProxyStatus{
+			Running:         false,
+			StartTime:       time.Time{},
+			ConnectionCount: 0,
+		}
+	} else {
+		ec.Status.mutex = sync.RWMutex{}
+	}
+
+	return nil
 }

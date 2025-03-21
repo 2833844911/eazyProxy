@@ -46,9 +46,56 @@ func init() {
 	// 初始化全局配置
 	globalConfig = NewExtendedProxyConfig()
 
+	// 尝试从配置文件加载配置
+	loadConfigFromFile()
+
 	// 初始化代理控制
 	proxyRunning = false
 	proxyStopChan = make(chan struct{})
+}
+
+// 从配置文件加载配置
+func loadConfigFromFile() {
+	// 检查配置文件是否存在
+	if _, err := os.Stat("config.json"); os.IsNotExist(err) {
+		log.Println("配置文件不存在，使用默认配置")
+		return
+	}
+
+	// 读取配置文件
+	configData, err := os.ReadFile("config.json")
+	if err != nil {
+		log.Printf("读取配置文件失败: %v，使用默认配置", err)
+		return
+	}
+
+	// 解析配置
+	var config ExtendedProxyConfig
+	err = json.Unmarshal(configData, &config)
+	if err != nil {
+		log.Printf("解析配置文件失败: %v，使用默认配置", err)
+		return
+	}
+
+	// 更新全局配置
+	globalConfig = &config
+
+	// 确保所有端口的状态都初始化为未运行
+	for _, port := range globalConfig.ProxyPorts {
+		if port.Status == nil {
+			port.Status = &ProxyStatus{
+				Running:         false,
+				StartTime:       time.Time{},
+				ConnectionCount: 0,
+				mutex:           sync.RWMutex{},
+			}
+		} else {
+			port.Status.Running = false
+			port.Status.ConnectionCount = 0
+		}
+	}
+
+	log.Println("已从配置文件加载配置")
 }
 
 // 主函数
@@ -126,14 +173,32 @@ func main() {
 	log.Printf("启动Web管理界面，监听地址: 0.0.0.0:%s\n", globalConfig.WebPort)
 	go r.Run(":" + globalConfig.WebPort)
 
-	// 启动代理服务器
-	startProxyServer()
-
-	// 启动默认代理服务器
-	startProxyPort("default")
+	// 从配置文件启动所有已启用的代理端口
+	startEnabledProxyPorts()
 
 	// 等待信号
 	select {}
+}
+
+// 启动所有已启用的代理端口
+func startEnabledProxyPorts() {
+	// 如果没有端口配置，启动默认端口
+	if len(globalConfig.ProxyPorts) == 0 {
+		log.Println("没有端口配置，启动默认代理服务器")
+		startProxyServer()
+		startProxyPort("default")
+		return
+	}
+
+	// 启动所有已启用的端口
+	for id, port := range globalConfig.ProxyPorts {
+		if port.Enabled {
+			log.Printf("从配置启动代理端口: %s (%s)", id, port.ListenAddr)
+			go startProxyPort(id)
+		} else {
+			log.Printf("代理端口未启用，跳过: %s (%s)", id, port.ListenAddr)
+		}
+	}
 }
 
 // 认证中间件
@@ -830,44 +895,36 @@ func handleStopProxyPort(c *gin.Context) {
 	})
 }
 
-// 启动单个代理端口
-func startProxyPort(id string) {
-	proxyMutex.Lock()
-	defer proxyMutex.Unlock()
-
-	// 检查是否已运行
-	if proxyRunningStatus[id] {
+// 启动指定ID的代理端口
+func startProxyPort(portID string) {
+	// 获取端口配置
+	port := globalConfig.GetProxyPort(portID)
+	if port == nil {
+		log.Printf("无法启动代理端口，端口ID不存在: %s", portID)
 		return
 	}
 
-	port := globalConfig.GetProxyPort(id)
-	if port == nil || !port.Enabled {
+	// 检查端口是否已经在运行
+	if port.Status.Running {
+		log.Printf("代理端口已经在运行中: %s (%s)", portID, port.ListenAddr)
 		return
 	}
 
-	// 创建代理服务器
-	proxyServers[id] = NewProxyServer(globalConfig, id)
+	// 创建代理服务器实例
+	server := NewProxyServer(globalConfig, portID)
 
-	// 标记为运行中
-	proxyRunningStatus[id] = true
+	// 启动代理服务器
+	err := server.Start()
+	if err != nil {
+		log.Printf("启动代理端口失败: %s (%s): %v", portID, port.ListenAddr, err)
+		return
+	}
 
-	// 启动服务器
-	go func() {
-		log.Printf("启动HTTPS代理服务器，监听地址: %s (端口ID: %s)\n", port.ListenAddr, id)
+	// 保存代理服务器实例
+	proxyServers[portID] = server
+	proxyRunningStatus[portID] = true
 
-		err := proxyServers[id].Start()
-		if err != nil {
-			log.Printf("启动代理服务器失败: %v (端口ID: %s)\n", err, id)
-
-			// 更新状态
-			proxyMutex.Lock()
-			proxyRunningStatus[id] = false
-			port.Status.mutex.Lock()
-			port.Status.Running = false
-			port.Status.mutex.Unlock()
-			proxyMutex.Unlock()
-		}
-	}()
+	log.Printf("代理端口已启动: %s (%s)", portID, port.ListenAddr)
 }
 
 // 停止单个代理端口
