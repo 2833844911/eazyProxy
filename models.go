@@ -88,11 +88,16 @@ func (sm *StatsManager) Reset() {
 // 扩展代理配置
 type ExtendedProxyConfig struct {
 	ProxyConfig
-	AdminUsername string
-	AdminPassword string
-	WebPort       string
-	Status        *ProxyStatus
-	StatsManager  *StatsManager
+	AdminUsername   string
+	AdminPassword   string
+	WebPort         string
+	Status          *ProxyStatus
+	StatsManager    *StatsManager
+	UseForwardProxy bool   // 是否启用代理转发功能
+	AllowAnonymous  bool   // 是否允许匿名访问（不需要认证）
+	RemoteProxyAddr string // 远程代理服务器地址
+	RemoteProxyUser string // 远程代理服务器用户名
+	RemoteProxyPass string // 远程代理服务器密码
 }
 
 // 创建新的扩展代理配置
@@ -102,10 +107,67 @@ func NewExtendedProxyConfig() *ExtendedProxyConfig {
 			ListenAddr: "0.0.0.0:8080",
 			CredStore:  NewCredentialStore(),
 		},
-		AdminUsername: "admin",
-		AdminPassword: "admin",
-		WebPort:       "8081",
-		Status:        &ProxyStatus{Running: false, StartTime: time.Time{}, ConnectionCount: 0, mutex: sync.RWMutex{}},
-		StatsManager:  NewStatsManager(),
+		AdminUsername:   "admin",
+		AdminPassword:   "admin",
+		WebPort:         "8081",
+		Status:          &ProxyStatus{Running: false, StartTime: time.Time{}, ConnectionCount: 0, mutex: sync.RWMutex{}},
+		StatsManager:    NewStatsManager(),
+		UseForwardProxy: false, // 默认不启用代理转发
+		AllowAnonymous:  false, // 默认不允许匿名访问
+		RemoteProxyAddr: "127.0.0.1:7890",
+		RemoteProxyUser: "dsdddd",
+		RemoteProxyPass: "dsdddd",
 	}
+}
+
+// 用户凭证存储
+type CredentialStore struct {
+	credentials map[string]string
+	noAuthUsers map[string]bool // 存储无需认证的用户
+	mutex       sync.RWMutex
+}
+
+// 创建新的凭证存储
+func NewCredentialStore() *CredentialStore {
+	return &CredentialStore{
+		credentials: make(map[string]string),
+		noAuthUsers: make(map[string]bool),
+		mutex:       sync.RWMutex{},
+	}
+}
+
+// 添加用户凭证
+func (cs *CredentialStore) AddCredential(username, password string) {
+	cs.mutex.Lock()
+	defer cs.mutex.Unlock()
+	cs.credentials[username] = password
+}
+
+// 添加无需认证的用户
+func (cs *CredentialStore) AddNoAuthUser(username string) {
+	cs.mutex.Lock()
+	defer cs.mutex.Unlock()
+	cs.noAuthUsers[username] = true
+}
+
+// 检查是否为无需认证的用户
+func (cs *CredentialStore) IsNoAuthUser(username string) bool {
+	cs.mutex.RLock()
+	defer cs.mutex.RUnlock()
+	return cs.noAuthUsers[username]
+}
+
+// 验证用户凭证
+func (cs *CredentialStore) Validate(username, password string) bool {
+	cs.mutex.RLock()
+	defer cs.mutex.RUnlock()
+
+	// 检查是否为无需认证的用户
+	if cs.noAuthUsers[username] {
+		return true
+	}
+
+	// 否则验证用户名和密码
+	stored, exists := cs.credentials[username]
+	return exists && stored == password
 }

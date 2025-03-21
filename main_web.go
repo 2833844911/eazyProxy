@@ -300,6 +300,7 @@ func handleGetUsers(c *gin.Context) {
 	for username := range globalConfig.CredStore.credentials {
 		users = append(users, gin.H{
 			"username": username,
+			"no_auth":  globalConfig.CredStore.IsNoAuthUser(username),
 		})
 	}
 
@@ -315,6 +316,7 @@ func handleAddUser(c *gin.Context) {
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		NoAuth   bool   `json:"no_auth"`
 	}
 
 	if err := c.BindJSON(&req); err != nil {
@@ -325,17 +327,31 @@ func handleAddUser(c *gin.Context) {
 		return
 	}
 
-	// 验证用户名和密码
-	if req.Username == "" || req.Password == "" {
+	// 验证用户名
+	if req.Username == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "用户名和密码不能为空",
+			"message": "用户名不能为空",
+		})
+		return
+	}
+
+	// 如果不是无认证用户，则验证密码
+	if !req.NoAuth && req.Password == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "密码不能为空",
 		})
 		return
 	}
 
 	// 添加用户
 	globalConfig.CredStore.AddCredential(req.Username, req.Password)
+
+	// 如果是无认证用户，记录到无认证用户列表
+	if req.NoAuth {
+		globalConfig.CredStore.AddNoAuthUser(req.Username)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -373,9 +389,14 @@ func handleGetSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"proxy_port":     strings.Split(globalConfig.ListenAddr, ":")[1],
-			"web_port":       globalConfig.WebPort,
-			"admin_username": globalConfig.AdminUsername,
+			"proxy_port":          strings.Split(globalConfig.ListenAddr, ":")[1],
+			"web_port":            globalConfig.WebPort,
+			"admin_username":      globalConfig.AdminUsername,
+			"use_forward_proxy":   globalConfig.UseForwardProxy,
+			"allow_anonymous":     globalConfig.AllowAnonymous,
+			"remote_proxy_addr":   globalConfig.RemoteProxyAddr,
+			"remote_proxy_user":   globalConfig.RemoteProxyUser,
+			"remote_proxy_pass":   globalConfig.RemoteProxyPass,
 		},
 	})
 }
@@ -384,10 +405,15 @@ func handleGetSettings(c *gin.Context) {
 func handleUpdateSettings(c *gin.Context) {
 	// 解析请求
 	var req struct {
-		ProxyPort     string `json:"proxy_port"`
-		WebPort       string `json:"web_port"`
-		AdminUsername string `json:"admin_username"`
-		AdminPassword string `json:"admin_password"`
+		ProxyPort        string `json:"proxy_port"`
+		WebPort          string `json:"web_port"`
+		AdminUsername    string `json:"admin_username"`
+		AdminPassword    string `json:"admin_password"`
+		UseForwardProxy  bool   `json:"use_forward_proxy"`
+		AllowAnonymous   bool   `json:"allow_anonymous"`
+		RemoteProxyAddr  string `json:"remote_proxy_addr"`
+		RemoteProxyUser  string `json:"remote_proxy_user"`
+		RemoteProxyPass  string `json:"remote_proxy_pass"`
 	}
 
 	if err := c.BindJSON(&req); err != nil {
@@ -426,6 +452,15 @@ func handleUpdateSettings(c *gin.Context) {
 		return
 	}
 
+	// 如果启用了代理转发，验证远程代理地址
+	if req.UseForwardProxy && req.RemoteProxyAddr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "启用代理转发时，远程代理地址不能为空",
+		})
+		return
+	}
+
 	// 更新设置
 	proxyMutex.Lock()
 	defer proxyMutex.Unlock()
@@ -442,6 +477,23 @@ func handleUpdateSettings(c *gin.Context) {
 	// 更新管理员密码（如果提供）
 	if req.AdminPassword != "" {
 		globalConfig.AdminPassword = req.AdminPassword
+	}
+
+	// 更新代理转发设置
+	globalConfig.UseForwardProxy = req.UseForwardProxy
+	
+	// 更新匿名访问设置
+	globalConfig.AllowAnonymous = req.AllowAnonymous
+	
+	// 更新远程代理设置
+	if req.RemoteProxyAddr != "" {
+		globalConfig.RemoteProxyAddr = req.RemoteProxyAddr
+	}
+	if req.RemoteProxyUser != "" {
+		globalConfig.RemoteProxyUser = req.RemoteProxyUser
+	}
+	if req.RemoteProxyPass != "" {
+		globalConfig.RemoteProxyPass = req.RemoteProxyPass
 	}
 
 	c.JSON(http.StatusOK, gin.H{

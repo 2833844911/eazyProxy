@@ -49,7 +49,6 @@ go build -o eazyProxy
 eazyProxy.exe
 
 # Linux/macOS
-chmod 777 ./eazyProxy
 ./eazyProxy
 ```
 

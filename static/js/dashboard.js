@@ -25,6 +25,29 @@ document.addEventListener('DOMContentLoaded', function() {
     setInterval(updateProxyStatus, 5000);
     setInterval(loadStats, 10000);
     
+    // 监听无需认证复选框变化
+    document.getElementById('no-auth-user').addEventListener('change', function() {
+        const passwordInput = document.getElementById('new-password');
+        if (this.checked) {
+            passwordInput.disabled = true;
+            passwordInput.required = false;
+            passwordInput.value = '';
+        } else {
+            passwordInput.disabled = false;
+            passwordInput.required = true;
+        }
+    });
+    
+    // 监听代理转发复选框变化
+    document.getElementById('use-forward-proxy').addEventListener('change', function() {
+        const remoteProxySettings = document.getElementById('remote-proxy-settings');
+        if (this.checked) {
+            remoteProxySettings.style.display = 'block';
+        } else {
+            remoteProxySettings.style.display = 'none';
+        }
+    });
+    
     // 处理导航菜单点击
     navItems.forEach(item => {
         item.addEventListener('click', function() {
@@ -101,6 +124,19 @@ document.addEventListener('DOMContentLoaded', function() {
         
         const username = document.getElementById('new-username').value;
         const password = document.getElementById('new-password').value;
+        const noAuth = document.getElementById('no-auth-user').checked;
+        
+        // 如果选择了"无需认证"但未填写用户名，则提示错误
+        if (noAuth && !username.trim()) {
+            alert('即使是无需认证的用户，也需要设置一个用户名作为标识');
+            return;
+        }
+        
+        // 如果未选择"无需认证"，但未填写密码，则提示错误
+        if (!noAuth && !password.trim()) {
+            alert('请输入用户密码');
+            return;
+        }
         
         fetch('/api/users', {
             method: 'POST',
@@ -110,7 +146,8 @@ document.addEventListener('DOMContentLoaded', function() {
             },
             body: JSON.stringify({
                 username: username,
-                password: password
+                password: noAuth ? "" : password,
+                no_auth: noAuth
             })
         })
         .then(response => response.json())
@@ -138,6 +175,17 @@ document.addEventListener('DOMContentLoaded', function() {
         const webPort = document.getElementById('web-port').value;
         const adminUsername = document.getElementById('admin-username').value;
         const adminPassword = document.getElementById('admin-password').value;
+        const useForwardProxy = document.getElementById('use-forward-proxy').checked;
+        const allowAnonymous = document.getElementById('allow-anonymous').checked;
+        const remoteProxyAddr = document.getElementById('remote-proxy-addr').value;
+        const remoteProxyUser = document.getElementById('remote-proxy-user').value;
+        const remoteProxyPass = document.getElementById('remote-proxy-pass').value;
+        
+        // 如果启用转发代理但未填写代理地址，显示提示
+        if (useForwardProxy && !remoteProxyAddr) {
+            alert('启用代理转发时，远程代理地址不能为空');
+            return;
+        }
         
         fetch('/api/settings', {
             method: 'POST',
@@ -149,7 +197,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 proxy_port: proxyPort,
                 web_port: webPort,
                 admin_username: adminUsername,
-                admin_password: adminPassword || undefined
+                admin_password: adminPassword || undefined,
+                use_forward_proxy: useForwardProxy,
+                allow_anonymous: allowAnonymous,
+                remote_proxy_addr: remoteProxyAddr,
+                remote_proxy_user: remoteProxyUser,
+                remote_proxy_pass: remoteProxyPass
             })
         })
         .then(response => response.json())
@@ -158,6 +211,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 alert('设置已保存，部分设置可能需要重启服务器才能生效');
                 // 重置密码字段
                 document.getElementById('admin-password').value = '';
+                document.getElementById('remote-proxy-pass').value = '';
             } else {
                 alert('保存设置失败: ' + data.message);
             }
@@ -256,7 +310,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     usernameCell.textContent = user.username;
                     
                     const passwordCell = document.createElement('td');
-                    passwordCell.textContent = '••••••••';
+                    passwordCell.textContent = user.no_auth ? '无需认证' : '••••••••';
                     
                     const actionCell = document.createElement('td');
                     const deleteBtn = document.createElement('button');
@@ -319,6 +373,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('proxy-port').value = settings.proxy_port;
                 document.getElementById('web-port').value = settings.web_port;
                 document.getElementById('admin-username').value = settings.admin_username;
+                document.getElementById('use-forward-proxy').checked = settings.use_forward_proxy || false;
+                document.getElementById('allow-anonymous').checked = settings.allow_anonymous || false;
+                
+                // 设置远程代理信息
+                if (settings.remote_proxy_addr) {
+                    document.getElementById('remote-proxy-addr').value = settings.remote_proxy_addr;
+                }
+                if (settings.remote_proxy_user) {
+                    document.getElementById('remote-proxy-user').value = settings.remote_proxy_user;
+                }
+                
+                // 显示/隐藏远程代理设置区域
+                const remoteProxySettings = document.getElementById('remote-proxy-settings');
+                remoteProxySettings.style.display = settings.use_forward_proxy ? 'block' : 'none';
             }
         })
         .catch(error => {

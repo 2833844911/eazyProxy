@@ -13,35 +13,6 @@ import (
 	"time"
 )
 
-// 用户凭证存储
-type CredentialStore struct {
-	credentials map[string]string
-	mutex       sync.RWMutex
-}
-
-// 创建新的凭证存储
-func NewCredentialStore() *CredentialStore {
-	return &CredentialStore{
-		credentials: make(map[string]string),
-		mutex:       sync.RWMutex{},
-	}
-}
-
-// 添加用户凭证
-func (cs *CredentialStore) AddCredential(username, password string) {
-	cs.mutex.Lock()
-	defer cs.mutex.Unlock()
-	cs.credentials[username] = password
-}
-
-// 验证用户凭证
-func (cs *CredentialStore) Validate(username, password string) bool {
-	cs.mutex.RLock()
-	defer cs.mutex.RUnlock()
-	stored, exists := cs.credentials[username]
-	return exists && stored == password
-}
-
 // 代理服务器配置
 type ProxyConfig struct {
 	ListenAddr string
@@ -150,6 +121,13 @@ func (ps *ProxyServer) handleConnection(client net.Conn) {
 		config.StatsManager.RecordRequest(domain)
 	}
 
+	// 检查是否启用了代理转发
+	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok && extConfig.UseForwardProxy {
+		// 使用代理转发处理请求
+		ps.handleProxyForwarding(client, req, reader)
+		return
+	}
+
 	// 处理CONNECT方法（HTTPS代理）
 	if req.Method == http.MethodConnect {
 		ps.handleHTTPS(client, req)
@@ -162,6 +140,11 @@ func (ps *ProxyServer) handleConnection(client net.Conn) {
 
 // 验证用户认证
 func (ps *ProxyServer) authenticate(req *http.Request) bool {
+	// 检查是否允许匿名访问
+	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok && extConfig.AllowAnonymous {
+		return true
+	}
+
 	// 获取Proxy-Authorization头
 	authHeader := req.Header.Get("Proxy-Authorization")
 	if authHeader == "" {
@@ -312,6 +295,89 @@ func (ps *ProxyServer) tunnel(client, target net.Conn) {
 	}()
 
 	wg.Wait()
+}
+
+// 处理转发到另一个代理服务器
+func (ps *ProxyServer) handleProxyForwarding(client net.Conn, req *http.Request, reader *bufio.Reader) {
+	// 获取远程代理服务器配置
+	var remoteProxyAddr, remoteProxyUsername, remoteProxyPassword string
+
+	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok {
+		remoteProxyAddr = extConfig.RemoteProxyAddr
+		remoteProxyUsername = extConfig.RemoteProxyUser
+		remoteProxyPassword = extConfig.RemoteProxyPass
+	} else {
+		// 使用默认值
+		remoteProxyAddr = "127.0.0.1:7890"
+		remoteProxyUsername = "username"
+		remoteProxyPassword = "admin"
+	}
+
+	log.Printf("转发请求到远程代理: %s", remoteProxyAddr)
+
+	// 连接到远程代理服务器
+	remoteProxy, err := net.Dial("tcp", remoteProxyAddr)
+	if err != nil {
+		log.Printf("无法连接到远程代理服务器 %s: %v\n", remoteProxyAddr, err)
+		return
+	}
+	defer remoteProxy.Close()
+
+	// 构建认证头
+	auth := base64.StdEncoding.EncodeToString([]byte(remoteProxyUsername + ":" + remoteProxyPassword))
+	req.Header.Set("Proxy-Authorization", "Basic "+auth)
+
+	// 对于CONNECT请求（HTTPS），直接发送到远程代理
+	if req.Method == http.MethodConnect {
+		// 发送CONNECT请求到远程代理
+		connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\nProxy-Authorization: Basic %s\r\nProxy-Connection: Keep-Alive\r\n\r\n",
+			req.Host, req.Host, auth)
+		_, err = remoteProxy.Write([]byte(connectReq))
+		if err != nil {
+			log.Printf("发送CONNECT请求到远程代理失败: %v\n", err)
+			return
+		}
+
+		// 读取远程代理的响应
+		proxyReader := bufio.NewReader(remoteProxy)
+		resp, err := http.ReadResponse(proxyReader, req)
+		if err != nil {
+			log.Printf("读取远程代理响应失败: %v\n", err)
+			return
+		}
+
+		// 检查响应状态
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("远程代理响应非200状态: %s\n", resp.Status)
+			resp.Write(client)
+			return
+		}
+
+		// 发送成功连接响应给客户端
+		successResp := "HTTP/1.1 200 Connection Established\r\n\r\n"
+		_, err = client.Write([]byte(successResp))
+		if err != nil {
+			log.Printf("发送响应给客户端失败: %v\n", err)
+			return
+		}
+
+		// 建立隧道
+		ps.tunnel(client, remoteProxy)
+		return
+	}
+
+	// 对于HTTP请求，转发到远程代理
+	err = req.Write(remoteProxy)
+	if err != nil {
+		log.Printf("发送HTTP请求到远程代理失败: %v\n", err)
+		return
+	}
+
+	// 将远程代理的响应转发给客户端
+	_, err = io.Copy(client, remoteProxy)
+	if err != nil && err != io.EOF {
+		log.Printf("转发远程代理响应失败: %v\n", err)
+	}
 }
 
 // 此文件不再包含main函数，main函数已移至main_web.go
