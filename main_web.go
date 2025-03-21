@@ -1018,7 +1018,7 @@ func handleDeletePortUser(c *gin.Context) {
 // 处理获取端口代理转发设置
 func handleGetPortForward(c *gin.Context) {
 	portID := c.Param("id")
-	
+
 	port := globalConfig.GetProxyPort(portID)
 	if port == nil {
 		c.JSON(http.StatusNotFound, gin.H{
@@ -1027,7 +1027,7 @@ func handleGetPortForward(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
@@ -1042,7 +1042,7 @@ func handleGetPortForward(c *gin.Context) {
 // 处理更新端口代理转发设置
 func handleUpdatePortForward(c *gin.Context) {
 	portID := c.Param("id")
-	
+
 	port := globalConfig.GetProxyPort(portID)
 	if port == nil {
 		c.JSON(http.StatusNotFound, gin.H{
@@ -1051,14 +1051,14 @@ func handleUpdatePortForward(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	var req struct {
 		UseForwardProxy bool   `json:"use_forward_proxy"`
 		RemoteProxyAddr string `json:"remote_proxy_addr"`
 		RemoteProxyUser string `json:"remote_proxy_user"`
 		RemoteProxyPass string `json:"remote_proxy_pass"`
 	}
-	
+
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -1066,7 +1066,7 @@ func handleUpdatePortForward(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// 验证远程代理地址（如果启用了代理转发）
 	if req.UseForwardProxy && req.RemoteProxyAddr == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -1075,33 +1075,50 @@ func handleUpdatePortForward(c *gin.Context) {
 		})
 		return
 	}
-	
-	log.Printf("更新端口 %s 的代理转发设置: 启用=%v, 地址=%s", 
+
+	log.Printf("更新端口 %s 的代理转发设置: 启用=%v, 地址=%s",
 		portID, req.UseForwardProxy, req.RemoteProxyAddr)
-	
+
+	// 记录是否需要重启
+	needRestart := port.Status.Running &&
+		(port.UseForwardProxy != req.UseForwardProxy ||
+			port.RemoteProxyAddr != req.RemoteProxyAddr ||
+			(req.RemoteProxyUser != "" && port.RemoteProxyUser != req.RemoteProxyUser) ||
+			(req.RemoteProxyPass != "" && port.RemoteProxyPass != req.RemoteProxyPass))
+
 	// 更新设置
 	port.UseForwardProxy = req.UseForwardProxy
 	port.RemoteProxyAddr = req.RemoteProxyAddr
-	port.RemoteProxyUser = req.RemoteProxyUser
-	
+
+	if req.RemoteProxyUser != "" {
+		port.RemoteProxyUser = req.RemoteProxyUser
+	}
+
 	// 只有在提供了新密码时才更新密码
 	if req.RemoteProxyPass != "" {
 		port.RemoteProxyPass = req.RemoteProxyPass
 	}
-	
+
 	// 保存配置到文件
 	saveConfig()
-	
-	// 如果端口正在运行，需要重启以应用新设置
-	if port.Status.Running {
+
+	// 如果需要重启且端口正在运行，则重启代理
+	if needRestart {
 		log.Printf("重启端口 %s 以应用新的代理转发设置", portID)
 		stopProxyPort(portID)
+
+		// 等待一小段时间确保端口完全关闭
+		time.Sleep(500 * time.Millisecond)
+
 		go startProxyPort(portID)
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "代理转发设置已更新",
+		"data": gin.H{
+			"restarted": needRestart,
+		},
 	})
 }
 
@@ -1113,13 +1130,13 @@ func saveConfig() {
 		log.Printf("序列化配置失败: %v", err)
 		return
 	}
-	
+
 	// 写入配置文件
 	err = os.WriteFile("config.json", configData, 0644)
 	if err != nil {
 		log.Printf("保存配置文件失败: %v", err)
 		return
 	}
-	
+
 	log.Println("配置已保存到文件")
 }

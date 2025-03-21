@@ -654,3 +654,17 @@ body {
     opacity: 0.7;
     pointer-events: none;
 }
+
+/* 表单提示信息 */
+.form-hint {
+    font-size: 0.8em;
+    color: #ff6b6b;
+    margin-top: 5px;
+    margin-bottom: 0;
+}
+
+/* 禁用的表单元素 */
+input:disabled {
+    background-color: #f5f5f5;
+    cursor: not-allowed;
+}
