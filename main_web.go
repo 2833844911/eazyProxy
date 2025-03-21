@@ -1076,6 +1076,9 @@ func handleUpdatePortForward(c *gin.Context) {
 		return
 	}
 	
+	log.Printf("更新端口 %s 的代理转发设置: 启用=%v, 地址=%s", 
+		portID, req.UseForwardProxy, req.RemoteProxyAddr)
+	
 	// 更新设置
 	port.UseForwardProxy = req.UseForwardProxy
 	port.RemoteProxyAddr = req.RemoteProxyAddr
@@ -1088,6 +1091,13 @@ func handleUpdatePortForward(c *gin.Context) {
 	
 	// 保存配置到文件
 	saveConfig()
+	
+	// 如果端口正在运行，需要重启以应用新设置
+	if port.Status.Running {
+		log.Printf("重启端口 %s 以应用新的代理转发设置", portID)
+		stopProxyPort(portID)
+		go startProxyPort(portID)
+	}
 	
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
