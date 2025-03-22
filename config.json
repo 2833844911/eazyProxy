@@ -1,1 +1,45 @@
-{}
+{
+  "ListenAddr": "0.0.0.0:8080",
+  "CredStore": {},
+  "AdminUsername": "admin",
+  "AdminPassword": "admin",
+  "WebPort": "8081",
+  "Status": {
+    "running": false,
+    "start_time": "0001-01-01T00:00:00Z",
+    "connection_count": 0
+  },
+  "StatsManager": {
+    "total_requests": 2,
+    "domain_stats": {
+      "ip.me": {
+        "domain": "ip.me",
+        "count": 2,
+        "last_visit": "2025-03-21T23:15:03.6740779+08:00"
+      }
+    }
+  },
+  "UseForwardProxy": false,
+  "AllowAnonymous": false,
+  "RemoteProxyAddr": "127.0.0.1:7890",
+  "RemoteProxyUser": "dsdddd",
+  "RemoteProxyPass": "dsdddd",
+  "ProxyPorts": {
+    "default": {
+      "id": "default",
+      "listen_addr": "0.0.0.0:8080",
+      "enabled": true,
+      "status": {
+        "running": true,
+        "start_time": "2025-03-21T23:14:08.6895616+08:00",
+        "connection_count": 0
+      },
+      "allow_anonymous": false,
+      "use_forward_proxy": false,
+      "remote_proxy_addr": "",
+      "remote_proxy_user": "",
+      "remote_proxy_pass": ""
+    },
+
+  }
+}
