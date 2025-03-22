@@ -85,9 +85,9 @@ func (ps *ProxyServer) Start() error {
 		if ps.portID != "" {
 			portConfig := extConfig.GetProxyPort(ps.portID)
 			if portConfig != nil {
-				log.Printf("端口 %s 配置: 匿名访问=%v, 代理转发=%v, 远程代理=%s", 
+				log.Printf("端口 %s 配置: 匿名访问=%v, 代理转发=%v, 远程代理=%s",
 					ps.portID, portConfig.AllowAnonymous, portConfig.UseForwardProxy, portConfig.RemoteProxyAddr)
-				
+
 				portConfig.Status.mutex.Lock()
 				portConfig.Status.Running = true
 				portConfig.Status.StartTime = time.Now()
@@ -96,9 +96,9 @@ func (ps *ProxyServer) Start() error {
 			}
 		} else {
 			// 兼容旧版本
-			log.Printf("全局配置: 匿名访问=%v, 代理转发=%v, 远程代理=%s", 
+			log.Printf("全局配置: 匿名访问=%v, 代理转发=%v, 远程代理=%s",
 				extConfig.AllowAnonymous, extConfig.UseForwardProxy, extConfig.RemoteProxyAddr)
-			
+
 			extConfig.Status.mutex.Lock()
 			extConfig.Status.Running = true
 			extConfig.Status.StartTime = time.Now()
@@ -129,7 +129,7 @@ func (ps *ProxyServer) Start() error {
 // 处理客户端连接
 func (ps *ProxyServer) handleConnection(client net.Conn, allowAnonymous bool) {
 	defer client.Close()
-	
+
 	// 更新连接计数
 	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok {
 		if ps.portID != "" {
@@ -145,10 +145,10 @@ func (ps *ProxyServer) handleConnection(client net.Conn, allowAnonymous bool) {
 			extConfig.Status.mutex.Unlock()
 		}
 	}
-	
+
 	// 创建缓冲读取器
 	reader := bufio.NewReader(client)
-	
+
 	// 读取HTTP请求
 	req, err := http.ReadRequest(reader)
 	if err != nil {
@@ -157,7 +157,7 @@ func (ps *ProxyServer) handleConnection(client net.Conn, allowAnonymous bool) {
 		}
 		return
 	}
-	
+
 	// 处理HTTP请求
 	ps.handleHTTP(client, req, reader)
 }
@@ -171,12 +171,12 @@ func (ps *ProxyServer) handleHTTP(client net.Conn, req *http.Request, reader *bu
 	if req.URL.Host == "" {
 		req.URL.Host = req.Host
 	}
-	
+
 	// 移除Proxy-Authorization头，避免将凭证发送到目标服务器
 	req.Header.Del("Proxy-Authorization")
 	req.Header.Del("Proxy-Connection")
 	// req.Header.Set("Connection", "close")
-	
+
 	// 检查是否需要认证
 	var allowAnonymous bool
 	if _, ok := ps.config.(ProxyConfig); ok {
@@ -193,7 +193,7 @@ func (ps *ProxyServer) handleHTTP(client net.Conn, req *http.Request, reader *bu
 			allowAnonymous = extConfig.AllowAnonymous
 		}
 	}
-	
+
 	// 如果不允许匿名访问，则需要认证
 	if !allowAnonymous && !ps.authenticate(req) {
 		// 发送认证失败响应
@@ -203,7 +203,7 @@ func (ps *ProxyServer) handleHTTP(client net.Conn, req *http.Request, reader *bu
 		client.Write([]byte(authRequired))
 		return
 	}
-	
+
 	// 记录域名访问统计
 	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok {
 		domain := req.Host
@@ -212,11 +212,11 @@ func (ps *ProxyServer) handleHTTP(client net.Conn, req *http.Request, reader *bu
 		}
 		extConfig.StatsManager.RecordRequest(domain)
 	}
-	
+
 	// 检查是否启用了代理转发
 	var useForwardProxy bool
 	var remoteProxyAddr string
-	
+
 	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok {
 		if ps.portID != "" {
 			// 检查端口级别的转发设置
@@ -224,30 +224,30 @@ func (ps *ProxyServer) handleHTTP(client net.Conn, req *http.Request, reader *bu
 			if portConfig != nil && portConfig.UseForwardProxy {
 				useForwardProxy = true
 				remoteProxyAddr = portConfig.RemoteProxyAddr
-				
+
 				log.Printf("使用端口 %s 的转发设置: %s", ps.portID, remoteProxyAddr)
 			}
 		} else if extConfig.UseForwardProxy {
 			// 兼容旧版本
 			useForwardProxy = true
 			remoteProxyAddr = extConfig.RemoteProxyAddr
-			
+
 			log.Printf("使用全局转发设置: %s", remoteProxyAddr)
 		}
 	}
-	
+
 	if useForwardProxy && remoteProxyAddr != "" {
 		// 使用代理转发处理请求
 		ps.handleProxyForwarding(client, req, reader)
 		return
 	}
-	
+
 	// 处理CONNECT方法（HTTPS代理）
 	if req.Method == http.MethodConnect {
 		ps.handleHTTPS(client, req)
 		return
 	}
-	
+
 	// 连接到目标服务器
 	log.Printf("处理HTTP请求: %s", req.URL.Host)
 	var target net.Conn
@@ -262,14 +262,14 @@ func (ps *ProxyServer) handleHTTP(client net.Conn, req *http.Request, reader *bu
 		return
 	}
 	defer target.Close()
-	
+
 	// 将请求发送到目标服务器
 	err = req.Write(target)
 	if err != nil {
 		log.Printf("发送请求到目标服务器失败: %v\n", err)
 		return
 	}
-	
+
 	// 将目标服务器的响应发送回客户端
 	_, err = io.Copy(client, target)
 	if err != nil && err != io.EOF {
@@ -397,7 +397,7 @@ func (ps *ProxyServer) tunnel(client, target net.Conn) {
 func (ps *ProxyServer) handleProxyForwarding(client net.Conn, req *http.Request, reader *bufio.Reader) {
 	var remoteProxyAddr, remoteProxyUsername, remoteProxyPassword string
 	var useForwardProxy bool
-	
+
 	// 获取代理转发设置
 	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok {
 		if ps.portID != "" {
@@ -407,7 +407,7 @@ func (ps *ProxyServer) handleProxyForwarding(client net.Conn, req *http.Request,
 				remoteProxyAddr = portConfig.RemoteProxyAddr
 				remoteProxyUsername = portConfig.RemoteProxyUser
 				remoteProxyPassword = portConfig.RemoteProxyPass
-				
+
 				log.Printf("使用端口 %s 的转发设置: %s", ps.portID, remoteProxyAddr)
 			}
 		} else if extConfig.UseForwardProxy {
@@ -416,19 +416,19 @@ func (ps *ProxyServer) handleProxyForwarding(client net.Conn, req *http.Request,
 			remoteProxyAddr = extConfig.RemoteProxyAddr
 			remoteProxyUsername = extConfig.RemoteProxyUser
 			remoteProxyPassword = extConfig.RemoteProxyPass
-			
+
 			log.Printf("使用全局转发设置: %s", remoteProxyAddr)
 		}
 	}
-	
+
 	// 如果没有启用代理转发，直接返回
 	if !useForwardProxy || remoteProxyAddr == "" {
 		log.Printf("代理转发未启用或远程代理地址为空")
 		return
 	}
-	
+
 	log.Printf("转发请求到远程代理: %s", remoteProxyAddr)
-	
+
 	// 连接到远程代理服务器
 	remoteProxy, err := net.Dial("tcp", remoteProxyAddr)
 	if err != nil {
