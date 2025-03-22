@@ -690,6 +690,9 @@ func handleAddProxyPort(c *gin.Context) {
 	// 添加到全局配置
 	globalConfig.AddProxyPort(port)
 
+	// 保存配置到文件
+	saveConfig()
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "代理端口已添加",
@@ -782,6 +785,9 @@ func handleUpdateProxyPort(c *gin.Context) {
 		go startProxyPort(id)
 	}
 
+	// 保存配置到文件
+	saveConfig()
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "代理端口已更新",
@@ -817,6 +823,9 @@ func handleDeleteProxyPort(c *gin.Context) {
 
 	// 删除配置
 	globalConfig.DeleteProxyPort(id)
+
+	// 保存配置到文件
+	saveConfig()
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -1044,6 +1053,9 @@ func handleAddPortUser(c *gin.Context) {
 		port.AddUser(req.Username, req.Password)
 	}
 
+	// 保存配置到文件
+	saveConfig()
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "用户已添加",
@@ -1065,6 +1077,9 @@ func handleDeletePortUser(c *gin.Context) {
 	}
 
 	port.DeleteUser(username)
+
+	// 保存配置到文件
+	saveConfig()
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
