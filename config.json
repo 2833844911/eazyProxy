@@ -31,15 +31,14 @@
       "enabled": true,
       "status": {
         "running": true,
-        "start_time": "2025-03-21T23:14:08.6895616+08:00",
-        "connection_count": 0
+        "start_time": "2025-03-25T19:56:20.5929378+08:00",
+        "connection_count": 9
       },
-      "allow_anonymous": false,
+      "allow_anonymous": true,
       "use_forward_proxy": false,
       "remote_proxy_addr": "",
       "remote_proxy_user": "",
       "remote_proxy_pass": ""
     }
-
   }
 }

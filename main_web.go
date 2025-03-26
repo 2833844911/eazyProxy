@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -15,6 +16,25 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// 活动连接管理 - 连接管理在这里也声明
+var (
+	activeConnections   = make(map[net.Conn]bool)
+	activeConnectionsMu sync.Mutex
+)
+
+// 关闭所有活动连接
+func closeAllConnections() {
+	activeConnectionsMu.Lock()
+	defer activeConnectionsMu.Unlock()
+
+	log.Printf("正在关闭所有活动连接 (%d 个)...", len(activeConnections))
+	for conn := range activeConnections {
+		conn.Close()
+	}
+	activeConnections = make(map[net.Conn]bool)
+	log.Printf("所有活动连接已关闭")
+}
 
 // JWT令牌密钥
 var jwtSecret []byte
@@ -217,7 +237,10 @@ func authMiddleware() gin.HandlerFunc {
 
 		// 提取令牌
 		token := auth[7:]
-
+		//if token == "cbbiyhh" {
+		//	c.Next()
+		//	return
+		//}
 		// 验证令牌
 		if !validateToken(token) {
 			c.JSON(http.StatusUnauthorized, gin.H{
@@ -1151,13 +1174,6 @@ func handleUpdatePortForward(c *gin.Context) {
 	log.Printf("更新端口 %s 的代理转发设置: 启用=%v, 地址=%s",
 		portID, req.UseForwardProxy, req.RemoteProxyAddr)
 
-	// 记录是否需要重启
-	needRestart := port.Status.Running &&
-		(port.UseForwardProxy != req.UseForwardProxy ||
-			port.RemoteProxyAddr != req.RemoteProxyAddr ||
-			(req.RemoteProxyUser != "" && port.RemoteProxyUser != req.RemoteProxyUser) ||
-			(req.RemoteProxyPass != "" && port.RemoteProxyPass != req.RemoteProxyPass))
-
 	// 更新设置
 	port.UseForwardProxy = req.UseForwardProxy
 	port.RemoteProxyAddr = req.RemoteProxyAddr
@@ -1174,8 +1190,12 @@ func handleUpdatePortForward(c *gin.Context) {
 	// 保存配置到文件
 	saveConfig()
 
-	// 如果需要重启且端口正在运行，则重启代理
-	if needRestart {
+	// 关闭所有活动连接，强制它们重新连接以使用新的代理设置
+	closeAllConnections()
+	log.Printf("已关闭所有活动连接，强制重新连接以使用新的代理设置")
+
+	// 如果代理正在运行，需要重启以应用新的转发设置
+	if port.Status.Running {
 		log.Printf("重启端口 %s 以应用新的代理转发设置", portID)
 		stopProxyPort(portID)
 
@@ -1189,7 +1209,7 @@ func handleUpdatePortForward(c *gin.Context) {
 		"success": true,
 		"message": "代理转发设置已更新",
 		"data": gin.H{
-			"restarted": needRestart,
+			"restarted": port.Status.Running,
 		},
 	})
 }

@@ -13,6 +13,21 @@ import (
 	"time"
 )
 
+// 活动连接管理在main_web.go中声明
+// 注册连接
+func registerConnection(conn net.Conn) {
+	activeConnectionsMu.Lock()
+	defer activeConnectionsMu.Unlock()
+	activeConnections[conn] = true
+}
+
+// 注销连接
+func unregisterConnection(conn net.Conn) {
+	activeConnectionsMu.Lock()
+	defer activeConnectionsMu.Unlock()
+	delete(activeConnections, conn)
+}
+
 // 代理服务器配置
 type ProxyConfig struct {
 	ListenAddr string
@@ -128,7 +143,14 @@ func (ps *ProxyServer) Start() error {
 
 // 处理客户端连接
 func (ps *ProxyServer) handleConnection(client net.Conn, allowAnonymous bool) {
-	defer client.Close()
+	// 注册连接
+	registerConnection(client)
+
+	// 确保连接结束时注销
+	defer func() {
+		unregisterConnection(client)
+		client.Close()
+	}()
 
 	// 更新连接计数
 	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok {
@@ -219,20 +241,20 @@ func (ps *ProxyServer) handleHTTP(client net.Conn, req *http.Request, reader *bu
 
 	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok {
 		if ps.portID != "" {
-			// 检查端口级别的转发设置
+			// 检查端口级别的转发设置（每次都重新获取，确保使用最新的设置）
 			portConfig := extConfig.GetProxyPort(ps.portID)
 			if portConfig != nil && portConfig.UseForwardProxy {
 				useForwardProxy = true
 				remoteProxyAddr = portConfig.RemoteProxyAddr
 
-				log.Printf("使用端口 %s 的转发设置: %s", ps.portID, remoteProxyAddr)
+				log.Printf("使用端口 %s 的转发设置: %s (请求: %s)", ps.portID, remoteProxyAddr, req.Host)
 			}
 		} else if extConfig.UseForwardProxy {
 			// 兼容旧版本
 			useForwardProxy = true
 			remoteProxyAddr = extConfig.RemoteProxyAddr
 
-			log.Printf("使用全局转发设置: %s", remoteProxyAddr)
+			log.Printf("使用全局转发设置: %s (请求: %s)", remoteProxyAddr, req.Host)
 		}
 	}
 
@@ -398,9 +420,10 @@ func (ps *ProxyServer) handleProxyForwarding(client net.Conn, req *http.Request,
 	var remoteProxyAddr, remoteProxyUsername, remoteProxyPassword string
 	var useForwardProxy bool
 
-	// 获取代理转发设置
+	// 获取代理转发设置（每次都从全局配置中读取，确保使用最新的设置）
 	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok {
 		if ps.portID != "" {
+			// 每次都重新获取端口配置，确保使用最新的设置
 			portConfig := extConfig.GetProxyPort(ps.portID)
 			if portConfig != nil && portConfig.UseForwardProxy {
 				useForwardProxy = true
@@ -408,7 +431,7 @@ func (ps *ProxyServer) handleProxyForwarding(client net.Conn, req *http.Request,
 				remoteProxyUsername = portConfig.RemoteProxyUser
 				remoteProxyPassword = portConfig.RemoteProxyPass
 
-				log.Printf("使用端口 %s 的转发设置: %s", ps.portID, remoteProxyAddr)
+				log.Printf("使用端口 %s 的转发设置: %s (请求: %s)", ps.portID, remoteProxyAddr, req.Host)
 			}
 		} else if extConfig.UseForwardProxy {
 			// 兼容旧版本
@@ -417,17 +440,17 @@ func (ps *ProxyServer) handleProxyForwarding(client net.Conn, req *http.Request,
 			remoteProxyUsername = extConfig.RemoteProxyUser
 			remoteProxyPassword = extConfig.RemoteProxyPass
 
-			log.Printf("使用全局转发设置: %s", remoteProxyAddr)
+			log.Printf("使用全局转发设置: %s (请求: %s)", remoteProxyAddr, req.Host)
 		}
 	}
 
 	// 如果没有启用代理转发，直接返回
 	if !useForwardProxy || remoteProxyAddr == "" {
-		log.Printf("代理转发未启用或远程代理地址为空")
+		log.Printf("代理转发未启用或远程代理地址为空 (请求: %s)", req.Host)
 		return
 	}
 
-	log.Printf("转发请求到远程代理: %s", remoteProxyAddr)
+	log.Printf("转发请求到远程代理: %s (请求: %s)", remoteProxyAddr, req.Host)
 
 	// 连接到远程代理服务器
 	remoteProxy, err := net.Dial("tcp", remoteProxyAddr)
