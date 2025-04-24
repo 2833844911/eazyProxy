@@ -194,11 +194,6 @@ func (ps *ProxyServer) handleHTTP(client net.Conn, req *http.Request, reader *bu
 		req.URL.Host = req.Host
 	}
 
-	// 移除Proxy-Authorization头，避免将凭证发送到目标服务器
-	req.Header.Del("Proxy-Authorization")
-	req.Header.Del("Proxy-Connection")
-	// req.Header.Set("Connection", "close")
-
 	// 检查是否需要认证
 	var allowAnonymous bool
 	if _, ok := ps.config.(ProxyConfig); ok {
@@ -225,7 +220,10 @@ func (ps *ProxyServer) handleHTTP(client net.Conn, req *http.Request, reader *bu
 		client.Write([]byte(authRequired))
 		return
 	}
-
+	// 移除Proxy-Authorization头，避免将凭证发送到目标服务器
+	req.Header.Del("Proxy-Authorization")
+	req.Header.Del("Proxy-Connection")
+	// req.Header.Set("Connection", "close")
 	// 记录域名访问统计
 	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok {
 		domain := req.Host
@@ -326,6 +324,7 @@ func (ps *ProxyServer) authenticate(req *http.Request) bool {
 	}
 
 	username, password := pair[0], pair[1]
+	fmt.Println(username, password)
 
 	// 首先检查端口专用用户
 	if extConfig, ok := ps.config.(*ExtendedProxyConfig); ok && ps.portID != "" {
