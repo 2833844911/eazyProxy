@@ -969,6 +969,10 @@ func stopProxyPort(id string) {
 		return
 	}
 
+	// 关闭所有活动连接
+	log.Printf("正在关闭端口 %s 的所有活动连接...", id)
+	closeAllConnections()
+
 	// 关闭TCP监听器
 	listenerMutex.Lock()
 	if listener, ok := proxyListeners[id]; ok && listener != nil {
